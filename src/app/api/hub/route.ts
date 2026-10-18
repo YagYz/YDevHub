@@ -1,0 +1,213 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getDb } from "@/lib/db";
+
+export async function GET() {
+  try {
+    const db = getDb();
+    const projects = db
+      .prepare("SELECT * FROM projects ORDER BY pinned DESC, updated_at DESC")
+      .all();
+    const tasks = db
+      .prepare("SELECT * FROM tasks ORDER BY created_at DESC")
+      .all();
+    const notes = db
+      .prepare("SELECT * FROM notes ORDER BY pinned DESC, updated_at DESC")
+      .all();
+    const configs = db
+      .prepare("SELECT * FROM configs ORDER BY created_at DESC")
+      .all();
+
+    return NextResponse.json({
+      projects: projects.map((p: any) => ({
+        ...p,
+        tech_stack: JSON.parse(p.tech_stack || "[]"),
+        pinned: Boolean(p.pinned),
+      })),
+      tasks,
+      notes: notes.map((n: any) => ({
+        ...n,
+        pinned: Boolean(n.pinned),
+      })),
+      configs: configs.map((c: any) => ({
+        ...c,
+        is_secret: Boolean(c.is_secret),
+      })),
+    });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const db = getDb();
+    const body = await req.json();
+    const { entity, action, payload } = body;
+
+    if (entity === "project") {
+      if (action === "create") {
+        const slug = (payload.name || "project")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-");
+        const stmt = db.prepare(`
+          INSERT INTO projects (name, slug, description, status, priority, tech_stack, repo_url, live_url, local_path, server_ip, server_port, docker_container, color, pinned)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const info = stmt.run(
+          payload.name,
+          slug,
+          payload.description || "",
+          payload.status || "active",
+          payload.priority || "medium",
+          JSON.stringify(payload.tech_stack || []),
+          payload.repo_url || "",
+          payload.live_url || "",
+          payload.local_path || "",
+          payload.server_ip || "",
+          payload.server_port || "",
+          payload.docker_container || "",
+          payload.color || "#6366f1",
+          payload.pinned ? 1 : 0
+        );
+        return NextResponse.json({ id: info.lastInsertRowid, success: true });
+      }
+
+      if (action === "update") {
+        const stmt = db.prepare(`
+          UPDATE projects
+          SET name = ?, description = ?, status = ?, priority = ?, tech_stack = ?,
+              repo_url = ?, live_url = ?, local_path = ?, server_ip = ?, server_port = ?,
+              docker_container = ?, color = ?, pinned = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `);
+        stmt.run(
+          payload.name,
+          payload.description || "",
+          payload.status || "active",
+          payload.priority || "medium",
+          JSON.stringify(payload.tech_stack || []),
+          payload.repo_url || "",
+          payload.live_url || "",
+          payload.local_path || "",
+          payload.server_ip || "",
+          payload.server_port || "",
+          payload.docker_container || "",
+          payload.color || "#6366f1",
+          payload.pinned ? 1 : 0,
+          payload.id
+        );
+        return NextResponse.json({ success: true });
+      }
+
+      if (action === "toggle_pin") {
+        db.prepare(
+          "UPDATE projects SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END, updated_at = datetime('now') WHERE id = ?"
+        ).run(payload.id);
+        return NextResponse.json({ success: true });
+      }
+
+      if (action === "delete") {
+        db.prepare("DELETE FROM projects WHERE id = ?").run(payload.id);
+        return NextResponse.json({ success: true });
+      }
+    }
+
+    if (entity === "task") {
+      if (action === "create") {
+        const stmt = db.prepare(`
+          INSERT INTO tasks (project_id, title, description, status, priority, tag, due_date)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        const info = stmt.run(
+          payload.project_id || null,
+          payload.title,
+          payload.description || "",
+          payload.status || "todo",
+          payload.priority || "medium",
+          payload.tag || "feature",
+          payload.due_date || ""
+        );
+        return NextResponse.json({ id: info.lastInsertRowid, success: true });
+      }
+
+      if (action === "update_status") {
+        db.prepare("UPDATE tasks SET status = ? WHERE id = ?").run(
+          payload.status,
+          payload.id
+        );
+        return NextResponse.json({ success: true });
+      }
+
+      if (action === "delete") {
+        db.prepare("DELETE FROM tasks WHERE id = ?").run(payload.id);
+        return NextResponse.json({ success: true });
+      }
+    }
+
+    if (entity === "note") {
+      if (action === "create") {
+        const stmt = db.prepare(`
+          INSERT INTO notes (project_id, title, content, category, pinned)
+          VALUES (?, ?, ?, ?, ?)
+        `);
+        const info = stmt.run(
+          payload.project_id || null,
+          payload.title,
+          payload.content || "",
+          payload.category || "general",
+          payload.pinned ? 1 : 0
+        );
+        return NextResponse.json({ id: info.lastInsertRowid, success: true });
+      }
+
+      if (action === "update") {
+        const stmt = db.prepare(`
+          UPDATE notes
+          SET project_id = ?, title = ?, content = ?, category = ?, pinned = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `);
+        stmt.run(
+          payload.project_id || null,
+          payload.title,
+          payload.content || "",
+          payload.category || "general",
+          payload.pinned ? 1 : 0,
+          payload.id
+        );
+        return NextResponse.json({ success: true });
+      }
+
+      if (action === "delete") {
+        db.prepare("DELETE FROM notes WHERE id = ?").run(payload.id);
+        return NextResponse.json({ success: true });
+      }
+    }
+
+    if (entity === "config") {
+      if (action === "create") {
+        const stmt = db.prepare(`
+          INSERT INTO configs (project_id, label, key_name, value_content, is_secret, environment)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const info = stmt.run(
+          payload.project_id || null,
+          payload.label,
+          payload.key_name,
+          payload.value_content,
+          payload.is_secret ? 1 : 0,
+          payload.environment || "production"
+        );
+        return NextResponse.json({ id: info.lastInsertRowid, success: true });
+      }
+
+      if (action === "delete") {
+        db.prepare("DELETE FROM configs WHERE id = ?").run(payload.id);
+        return NextResponse.json({ success: true });
+      }
+    }
+
+    return NextResponse.json({ error: "Invalid action or entity" }, { status: 400 });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

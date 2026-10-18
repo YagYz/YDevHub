@@ -1,0 +1,32 @@
+services:
+  ydevhub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # GitHub Container Registry üzerinden otomatik güncelleme kullanırken image satırını kendi GitHub kullanıcı adınla aktif edebilirsin:
+    # image: ghcr.io/yagyz/ydevhub:latest
+    container_name: ydevhub-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DB_DIR=/app/data
+      - DB_PATH=/app/data/ydevhub.db
+    volumes:
+      # SQLite veritabanı bu klasörde kalıcı olarak saklanır, başka sunucuya taşırken sadece ./data klasörünü kopyalaman yeterlidir!
+      - ./data:/app/data
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # Watchtower: GitHub'a yeni commit/merge attığında oluşan yeni Docker imajını algılar ve konteyneri otomatik günceller
+  watchtower:
+    image: containrrr/watchtower
+    container_name: ydevhub-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_POLL_INTERVAL=60
