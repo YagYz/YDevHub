@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # GitHub Container Registry üzerinden otomatik güncelleme kullanırken image satırını kendi GitHub kullanıcı adınla aktif edebilirsin:
+    # GitHub Container Registry üzerinden otomatik güncelleme kullanırken image satırını aktif edebilirsin:
     # image: ghcr.io/yagyz/ydevhub:latest
     container_name: ydevhub-app
     restart: unless-stopped
