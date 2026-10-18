@@ -4,6 +4,7 @@ out/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data-dev/
 .env*.local
 .DS_Store
 *.tsbuildinfo
