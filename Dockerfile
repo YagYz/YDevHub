@@ -3,9 +3,10 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm install --no-audit --no-fund
 
 COPY . .
+RUN mkdir -p /app/public
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
@@ -21,7 +22,7 @@ ENV DB_DIR="/app/data"
 ENV DB_PATH="/app/data/ydevhub.db"
 
 # SQLite veritabanı klasörü oluştur
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/public
 
 # Standalone derleme çıktılarını kopyala
 COPY --from=builder /app/public ./public

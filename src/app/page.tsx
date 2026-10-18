@@ -14,9 +14,7 @@ import {
   Terminal,
   Pin,
   Trash2,
-  CheckCircle2,
   Clock,
-  AlertCircle,
   Sparkles,
   Copy,
   Check,
@@ -26,9 +24,13 @@ import {
   Edit3,
   ArrowRight,
   RefreshCw,
-  Cpu,
   HardDrive,
   X,
+  Lock,
+  LogOut,
+  ShieldCheck,
+  Activity,
+  Download,
 } from "lucide-react";
 
 type Project = {
@@ -97,6 +99,16 @@ const PRIORITY_MAP: Record<string, { label: string; color: string }> = {
 };
 
 export default function YDevHubPage() {
+  // Auth states
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState(true);
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [securitySavedMsg, setSecuritySavedMsg] = useState("");
+
   const [activeTab, setActiveTab] = useState<"dashboard" | "kanban" | "notes" | "vault" | "cicd">("dashboard");
   const [selectedProjectId, setSelectedProjectId] = useState<number | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -106,6 +118,10 @@ export default function YDevHubPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [configs, setConfigs] = useState<ConfigItem[]>([]);
+
+  // Health / Ping states
+  const [healthStatus, setHealthStatus] = useState<Record<number, { online: boolean; latencyMs: number }>>({});
+  const [checkingHealth, setCheckingHealth] = useState(false);
 
   // Active note for editor
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -161,18 +177,57 @@ export default function YDevHubPage() {
     environment: "production",
   });
 
+  const checkServersHealth = async (projectList: Project[]) => {
+    setCheckingHealth(true);
+    try {
+      const targets = projectList
+        .filter((p) => p.server_port)
+        .map((p) => ({
+          id: p.id,
+          host: p.server_ip || "127.0.0.1",
+          port: Number(p.server_port),
+        }));
+      const res = await fetch("/api/health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets }),
+      });
+      const data = await res.json();
+      if (data.results) {
+        setHealthStatus(data.results);
+      }
+    } catch (e) {
+      console.error("Health check error:", e);
+    } finally {
+      setCheckingHealth(false);
+    }
+  };
+
   const fetchHubData = async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/hub");
+      if (res.status === 401) {
+        setAuthenticated(false);
+        setAuthChecked(true);
+        setLoading(false);
+        return;
+      }
       const data = await res.json();
-      setProjects(data.projects || []);
+      const loadedProjects = data.projects || [];
+      setProjects(loadedProjects);
       setTasks(data.tasks || []);
       setNotes(data.notes || []);
       setConfigs(data.configs || []);
+      setAuthenticated(true);
+      setAuthChecked(true);
 
       if (!selectedNote && data.notes?.length > 0) {
         selectNoteForEdit(data.notes[0]);
+      }
+
+      if (loadedProjects.length > 0) {
+        checkServersHealth(loadedProjects);
       }
     } catch (err) {
       console.error("Veri yüklenemedi:", err);
@@ -182,8 +237,86 @@ export default function YDevHubPage() {
   };
 
   useEffect(() => {
-    fetchHubData();
+    fetch("/api/auth")
+      .then((r) => r.json())
+      .then((d) => {
+        setAuthEnabled(Boolean(d.authEnabled));
+        if (d.authenticated) {
+          setAuthenticated(true);
+          fetchHubData();
+        } else {
+          setAuthenticated(false);
+          setAuthChecked(true);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        setAuthChecked(true);
+        setLoading(false);
+      });
   }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "login", password: loginPassword }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setLoginError(data.error || "Giriş başarısız");
+      return;
+    }
+    setLoginPassword("");
+    setAuthenticated(true);
+    fetchHubData();
+  };
+
+  const handleLogout = async () => {
+    await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "logout" }),
+    });
+    setAuthenticated(false);
+  };
+
+  const handleUpdateSecurity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update_security",
+        newPassword: newAdminPassword,
+        authEnabled,
+      }),
+    });
+    if (res.ok) {
+      setNewAdminPassword("");
+      setSecuritySavedMsg("Güvenlik ayarları kaydedildi!");
+      setTimeout(() => setSecuritySavedMsg(""), 2500);
+    }
+  };
+
+  const handleExportBackup = () => {
+    const backup = {
+      exported_at: new Date().toISOString(),
+      projects,
+      tasks,
+      notes,
+      configs,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ydevhub-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const selectNoteForEdit = (n: Note) => {
     setSelectedNote(n);
@@ -383,6 +516,61 @@ export default function YDevHubPage() {
     setShowConfigModal(false);
   };
 
+  // Show sleek Login Screen if not authenticated
+  if (authChecked && !authenticated) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-2xl bg-zinc-900/80 border border-zinc-800 p-8 space-y-6 shadow-2xl">
+          <div className="flex flex-col items-center text-center space-y-2">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 mb-1">
+              <Lock className="w-7 h-7 text-white" />
+            </div>
+            <h1 className="text-xl font-bold text-white">YDevHub Komuta Merkezi</h1>
+            <p className="text-xs text-zinc-400">
+              Proje verilerine, sunucu yapılandırmalarına ve <code className="text-indigo-400">.env</code> kasasına erişmek için yönetici şifresini girin.
+            </p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                Yönetici Şifresi / PIN
+              </label>
+              <input
+                type="password"
+                autoFocus
+                required
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            {loginError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-400">
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition shadow-lg shadow-indigo-600/25"
+            >
+              Kilidi Aç & Giriş Yap
+            </button>
+          </form>
+
+          <div className="pt-3 border-t border-zinc-800/80 text-center">
+            <p className="text-[11px] text-zinc-500">
+              İlk kurulum varsayılan şifresi: <code className="text-zinc-300 font-mono">yagyz123</code> (İçeriden değiştirebilirsin)
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
       {/* LEFT SIDEBAR */}
@@ -398,7 +586,7 @@ export default function YDevHubPage() {
                 <h1 className="font-bold text-base tracking-tight text-white flex items-center gap-1.5">
                   YDevHub
                   <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    v1.0
+                    v1.2
                   </span>
                 </h1>
                 <p className="text-xs text-zinc-400">Proje & Sunucu Üssü</p>
@@ -524,43 +712,77 @@ export default function YDevHubPage() {
               <span className="font-mono text-[11px] text-zinc-500">{projects.length}</span>
             </button>
 
-            {projects.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedProjectId(p.id)}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                  selectedProjectId === p.id
-                    ? "bg-zinc-800 text-white"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-                }`}
-              >
-                <span className="flex items-center gap-2 truncate">
-                  <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: p.color }}
-                  />
-                  <span className="truncate">{p.name}</span>
-                </span>
-                {p.server_port && (
-                  <span className="font-mono text-[10px] text-zinc-500">:{p.server_port}</span>
-                )}
-              </button>
-            ))}
+            {projects.map((p) => {
+              const h = healthStatus[p.id];
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedProjectId(p.id)}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    selectedProjectId === p.id
+                      ? "bg-zinc-800 text-white"
+                      : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 truncate">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: p.color }}
+                    />
+                    <span className="truncate">{p.name}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    {p.server_port && (
+                      <span className="font-mono text-[10px] text-zinc-500">:{p.server_port}</span>
+                    )}
+                    {h && (
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          h.online ? "bg-emerald-400" : "bg-zinc-600"
+                        }`}
+                        title={h.online ? `Online (${h.latencyMs}ms)` : "Port Kapalı"}
+                      />
+                    )}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Bottom Storage & DB Indicator */}
-        <div className="p-4 border-t border-zinc-800/80 bg-zinc-900/30 space-y-2">
+        {/* Bottom Storage, Backup & Security Controls */}
+        <div className="p-4 border-t border-zinc-800/80 bg-zinc-900/30 space-y-2.5">
           <div className="flex items-center justify-between text-xs">
             <span className="text-zinc-400 flex items-center gap-1.5">
               <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-              SQLite (WAL Mode)
+              SQLite (WAL)
             </span>
-            <span className="text-[11px] font-mono text-emerald-400">Aktif</span>
+            <button
+              onClick={handleExportBackup}
+              className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+              title="Tüm verileri JSON olarak indir"
+            >
+              <Download className="w-3 h-3" /> Yedek İndir
+            </button>
           </div>
-          <p className="text-[11px] font-mono text-zinc-500 truncate">
-            /mnt/Depo/Projeler/YDevHub
-          </p>
+
+          <div className="flex items-center gap-1.5 pt-1">
+            <button
+              onClick={() => setShowSecurityModal(true)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] text-zinc-300 transition"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              Şifre Ayarı
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center justify-center gap-1 py-1.5 px-2.5 rounded-lg bg-zinc-900 hover:bg-rose-500/15 border border-zinc-800 hover:border-rose-500/30 text-[11px] text-zinc-400 hover:text-rose-300 transition"
+              title="Oturumu Kapat ve Kilitle"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Kilitle
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -580,6 +802,15 @@ export default function YDevHubPage() {
           </div>
 
           <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => checkServersHealth(projects)}
+              disabled={checkingHealth}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium transition"
+              title="Proje portlarının açık olup olmadığını kontrol et"
+            >
+              <Activity className={`w-3.5 h-3.5 text-emerald-400 ${checkingHealth ? "animate-spin" : ""}`} />
+              Portları Tara
+            </button>
             <button
               onClick={openCreateProject}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition shadow-lg shadow-indigo-600/20"
@@ -682,7 +913,7 @@ export default function YDevHubPage() {
                 <div>
                   <h2 className="text-lg font-semibold text-white">Proje Portföyü & Teknik Künye</h2>
                   <p className="text-xs text-zinc-400">
-                    Geliştirdiğin tüm sistemlerin dizin, port, Docker konteyner ve GitHub bağlantıları
+                    Geliştirdiğin tüm sistemlerin dizin, port, canlı erişim durumu, Docker konteyner ve GitHub bağlantıları
                   </p>
                 </div>
               </div>
@@ -695,6 +926,7 @@ export default function YDevHubPage() {
                     projectTasks.length > 0
                       ? Math.round((doneTasks / projectTasks.length) * 100)
                       : 0;
+                  const pHealth = healthStatus[project.id];
 
                   return (
                     <div
@@ -718,13 +950,31 @@ export default function YDevHubPage() {
                                   <Pin className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
                                 )}
                               </div>
-                              <span
-                                className={`inline-block mt-1.5 text-[11px] font-medium px-2.5 py-0.5 rounded-full border ${
-                                  STATUS_MAP[project.status]?.badge || STATUS_MAP.active.badge
-                                }`}
-                              >
-                                {STATUS_MAP[project.status]?.label || project.status}
-                              </span>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <span
+                                  className={`inline-block text-[11px] font-medium px-2.5 py-0.5 rounded-full border ${
+                                    STATUS_MAP[project.status]?.badge || STATUS_MAP.active.badge
+                                  }`}
+                                >
+                                  {STATUS_MAP[project.status]?.label || project.status}
+                                </span>
+                                {pHealth && (
+                                  <span
+                                    className={`inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                                      pHealth.online
+                                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                        : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                                    }`}
+                                  >
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-full ${
+                                        pHealth.online ? "bg-emerald-400" : "bg-zinc-500"
+                                      }`}
+                                    />
+                                    {pHealth.online ? `Online (${pHealth.latencyMs}ms)` : "Port Kapalı"}
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             <div className="flex items-center gap-1">
@@ -1181,19 +1431,17 @@ export default function YDevHubPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                   <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-1.5">
-                    <span className="text-xs font-mono text-indigo-400">1. Adım: Git Push</span>
-                    <p className="text-sm font-semibold text-white">Kodu GitHub&apos;a Gönder</p>
+                    <span className="text-xs font-mono text-indigo-400">1. Adım: dev Dalı</span>
+                    <p className="text-sm font-semibold text-white">Geliştir & Test Et</p>
                     <p className="text-xs text-zinc-400">
-                      Sen <code className="text-zinc-200">main</code> dalına commit atıp push veya merge
-                      yaptığında GitHub Actions otomatik tetiklenir.
+                      Yeni özellikleri <code className="text-zinc-200">dev</code> dalında geliştir. GitHub Actions derleme testini otomatik yapar.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-1.5">
-                    <span className="text-xs font-mono text-emerald-400">2. Adım: GHCR Build</span>
+                    <span className="text-xs font-mono text-emerald-400">2. Adım: main Merge</span>
                     <p className="text-sm font-semibold text-white">Bulutta Docker İmajı</p>
                     <p className="text-xs text-zinc-400">
-                      Sunucunu hiç yormadan GitHub kendi sunucularında Docker imajını derler ve{" "}
-                      <code className="text-zinc-200">ghcr.io</code> adresine yükler.
+                      <code className="text-zinc-200">main</code> dalına merge ettiğinde GitHub imajı derler ve <code className="text-zinc-200">ghcr.io</code> adresine yükler.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-1.5">
@@ -1212,19 +1460,90 @@ export default function YDevHubPage() {
                   Hızlı Terminal Komutları (/mnt/Depo/Projeler/YDevHub)
                 </h3>
                 <pre className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed">
-{`# 1. Yerelde veya Sunucuda Docker ile hemen başlatmak için:
-docker compose up -d --build
+{`# 1. Geliştirme dalında çalışıp pushlamak için:
+git checkout dev
+git add .
+git commit -m "feat: yeni geliştirme"
+git push origin dev
 
-# 2. GitHub'a ilk kez göndermek için:
-git remote add origin https://github.com/KULLANICI_ADIN/ydevhub.git
-git branch -M main
-git push -u origin main`}
+# 2. Test sonrası Canlıya (main) Merge edip oto-güncellemeyi başlatmak için:
+git checkout main
+git merge dev
+git push origin main
+git checkout dev`}
                 </pre>
               </div>
             </div>
           )}
         </main>
       </div>
+
+      {/* MODAL: SECURITY & PASSWORD SETTINGS */}
+      {showSecurityModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                Yönetici Güvenlik & Şifre Ayarları
+              </h3>
+              <button
+                onClick={() => setShowSecurityModal(false)}
+                className="text-zinc-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateSecurity} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-zinc-400 mb-1">
+                  Yeni Yönetici Şifresi (Değiştirmek istemiyorsan boş bırak)
+                </label>
+                <input
+                  type="password"
+                  value={newAdminPassword}
+                  onChange={(e) => setNewAdminPassword(e.target.value)}
+                  placeholder="En az 4 karakterli yeni şifre..."
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white"
+                />
+              </div>
+
+              <label className="flex items-center gap-2.5 text-zinc-300 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={authEnabled}
+                  onChange={(e) => setAuthEnabled(e.target.checked)}
+                  className="rounded bg-zinc-950 border-zinc-700"
+                />
+                Giriş Ekranı Şifre Koruması Aktif Olsun
+              </label>
+
+              {securitySavedMsg && (
+                <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
+                  {securitySavedMsg}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setShowSecurityModal(false)}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300"
+                >
+                  Kapat
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium"
+                >
+                  Ayarları Kaydet
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: CREATE / EDIT PROJECT */}
       {showProjectModal && (

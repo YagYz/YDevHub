@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 
 const DB_DIR = process.env.DB_DIR || path.join(process.cwd(), "data");
 const DB_PATH = process.env.DB_PATH || path.join(DB_DIR, "ydevhub.db");
@@ -10,6 +11,37 @@ if (!fs.existsSync(DB_DIR)) {
 }
 
 let dbInstance: DatabaseSync | null = null;
+
+export function getDbPath(): string {
+  return DB_PATH;
+}
+
+export const SESSION_COOKIE_NAME = "ydevhub_session";
+
+export function hashPassword(password: string): string {
+  return crypto.createHash("sha256").update(password + "_ydevhub_salt").digest("hex");
+}
+
+export function verifySessionToken(token?: string): boolean {
+  const db = getDb();
+  const authEnabled = db
+    .prepare("SELECT value FROM settings WHERE key = 'auth_enabled'")
+    .get() as { value: string } | undefined;
+
+  if (authEnabled && authEnabled.value === "0") {
+    return true;
+  }
+
+  if (!token) return false;
+
+  const session = db
+    .prepare(
+      "SELECT token FROM sessions WHERE token = ? AND datetime(expires_at) > datetime('now')"
+    )
+    .get(token) as { token: string } | undefined;
+
+  return Boolean(session);
+}
 
 export function getDb(): DatabaseSync {
   if (!dbInstance) {
@@ -23,6 +55,17 @@ export function getDb(): DatabaseSync {
 
 function initSchema(db: DatabaseSync) {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -81,6 +124,19 @@ function initSchema(db: DatabaseSync) {
     );
   `);
 
+  // Initialize default admin password if not set
+  const existingPass = db
+    .prepare("SELECT value FROM settings WHERE key = 'admin_password_hash'")
+    .get() as { value: string } | undefined;
+
+  if (!existingPass) {
+    const defaultPassword = process.env.ADMIN_PASSWORD || "yagyz123";
+    db.prepare("INSERT INTO settings (key, value) VALUES ('admin_password_hash', ?)").run(
+      hashPassword(defaultPassword)
+    );
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('auth_enabled', '1')").run();
+  }
+
   const count = db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number };
   if (count.c === 0) {
     const insertProject = db.prepare(`
@@ -95,7 +151,7 @@ function initSchema(db: DatabaseSync) {
       "active",
       "critical",
       JSON.stringify(["Next.js 15", "TypeScript", "SQLite (Native)", "Docker", "TailwindCSS", "Watchtower"]),
-      "https://github.com/yagyz/YDevHub",
+      "https://github.com/YagYz/YDevHub",
       "http://localhost:3000",
       "/mnt/Depo/Projeler/YDevHub",
       "127.0.0.1",
@@ -112,7 +168,7 @@ function initSchema(db: DatabaseSync) {
       "active",
       "high",
       JSON.stringify(["Go", "Docker", "Linux", "WebSockets"]),
-      "https://github.com/yagyz/YSentry",
+      "https://github.com/YagYz/YSentry",
       "",
       "/mnt/Depo/Projeler/YSentry",
       "192.168.1.100",

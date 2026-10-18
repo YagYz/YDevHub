@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/db";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    if (!verifySessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
+      return NextResponse.json({ error: "Unauthorized", unauthorized: true }, { status: 401 });
+    }
+
     const db = getDb();
     const projects = db
       .prepare("SELECT * FROM projects ORDER BY pinned DESC, updated_at DESC")
@@ -40,6 +44,10 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    if (!verifySessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
+      return NextResponse.json({ error: "Unauthorized", unauthorized: true }, { status: 401 });
+    }
+
     const db = getDb();
     const body = await req.json();
     const { entity, action, payload } = body;
@@ -69,7 +77,7 @@ export async function POST(req: NextRequest) {
           payload.color || "#6366f1",
           payload.pinned ? 1 : 0
         );
-        return NextResponse.json({ id: info.lastInsertRowid, success: true });
+        return NextResponse.json({ id: Number(info.lastInsertRowid), success: true });
       }
 
       if (action === "update") {
@@ -127,7 +135,7 @@ export async function POST(req: NextRequest) {
           payload.tag || "feature",
           payload.due_date || ""
         );
-        return NextResponse.json({ id: info.lastInsertRowid, success: true });
+        return NextResponse.json({ id: Number(info.lastInsertRowid), success: true });
       }
 
       if (action === "update_status") {
@@ -157,7 +165,7 @@ export async function POST(req: NextRequest) {
           payload.category || "general",
           payload.pinned ? 1 : 0
         );
-        return NextResponse.json({ id: info.lastInsertRowid, success: true });
+        return NextResponse.json({ id: Number(info.lastInsertRowid), success: true });
       }
 
       if (action === "update") {
@@ -197,7 +205,7 @@ export async function POST(req: NextRequest) {
           payload.is_secret ? 1 : 0,
           payload.environment || "production"
         );
-        return NextResponse.json({ id: info.lastInsertRowid, success: true });
+        return NextResponse.json({ id: Number(info.lastInsertRowid), success: true });
       }
 
       if (action === "delete") {
