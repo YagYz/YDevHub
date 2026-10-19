@@ -5,9 +5,13 @@ import crypto from "crypto";
 
 const DB_DIR = process.env.DB_DIR || path.join(process.cwd(), "data");
 const DB_PATH = process.env.DB_PATH || path.join(DB_DIR, "ydevhub.db");
+const UPLOADS_DIR = path.join(DB_DIR, "uploads");
 
 if (!fs.existsSync(DB_DIR)) {
   fs.mkdirSync(DB_DIR, { recursive: true });
+}
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
 let dbInstance: DatabaseSync | null = null;
@@ -16,10 +20,31 @@ export function getDbPath(): string {
   return DB_PATH;
 }
 
+export function getUploadsDir(): string {
+  return UPLOADS_DIR;
+}
+
 export const SESSION_COOKIE_NAME = "ydevhub_session";
 
 export function hashPassword(password: string): string {
+  return crypto
+    .pbkdf2Sync(password, "ydevhub_homelab_salt_v2", 10000, 32, "sha256")
+    .toString("hex");
+}
+
+export function legacyHashPassword(password: string): string {
   return crypto.createHash("sha256").update(password + "_ydevhub_salt").digest("hex");
+}
+
+export function safeCompareHex(a: string, b: string): boolean {
+  try {
+    const bufA = Buffer.from(a, "utf8");
+    const bufB = Buffer.from(b, "utf8");
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
 }
 
 export function verifySessionToken(token?: string): boolean {
@@ -32,7 +57,7 @@ export function verifySessionToken(token?: string): boolean {
     return true;
   }
 
-  if (!token) return false;
+  if (!token || typeof token !== "string" || token.length > 128) return false;
 
   const session = db
     .prepare(
@@ -53,6 +78,13 @@ export function getDb(): DatabaseSync {
   return dbInstance;
 }
 
+function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 function initSchema(db: DatabaseSync) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -66,11 +98,19 @@ function initSchema(db: DatabaseSync) {
       expires_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      ip TEXT PRIMARY KEY,
+      attempts INTEGER DEFAULT 0,
+      locked_until TEXT DEFAULT ''
+    );
+
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       slug TEXT NOT NULL,
       description TEXT DEFAULT '',
+      readme_md TEXT DEFAULT '',
+      cover_image TEXT DEFAULT '',
       status TEXT DEFAULT 'active',
       priority TEXT DEFAULT 'medium',
       tech_stack TEXT DEFAULT '[]',
@@ -84,6 +124,25 @@ function initSchema(db: DatabaseSync) {
       pinned INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS project_images (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      title TEXT DEFAULT '',
+      image_url TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS commands (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER,
+      title TEXT NOT NULL,
+      command_text TEXT NOT NULL,
+      category TEXT DEFAULT 'docker', -- 'docker' | 'ssh' | 'git' | 'sql' | 'system'
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS tasks (
@@ -124,6 +183,10 @@ function initSchema(db: DatabaseSync) {
     );
   `);
 
+  // Safe migration for existing databases
+  ensureColumn(db, "projects", "readme_md", "TEXT DEFAULT ''");
+  ensureColumn(db, "projects", "cover_image", "TEXT DEFAULT ''");
+
   // Initialize default admin password if not set
   const existingPass = db
     .prepare("SELECT value FROM settings WHERE key = 'admin_password_hash'")
@@ -137,134 +200,64 @@ function initSchema(db: DatabaseSync) {
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('auth_enabled', '1')").run();
   }
 
-  const count = db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number };
-  if (count.c === 0) {
-    const insertProject = db.prepare(`
-      INSERT INTO projects (name, slug, description, status, priority, tech_stack, repo_url, live_url, local_path, server_ip, server_port, docker_container, color, pinned)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  // Seed default commands if commands table is empty
+  const cmdCount = db.prepare("SELECT COUNT(*) as c FROM commands").get() as { c: number };
+  if (cmdCount.c === 0) {
+    const firstProj = db.prepare("SELECT id FROM projects ORDER BY id ASC LIMIT 1").get() as
+      | { id: number }
+      | undefined;
+    const pid = firstProj ? firstProj.id : null;
+    const insertCmd = db.prepare(`
+      INSERT INTO commands (project_id, title, command_text, category)
+      VALUES (?, ?, ?, ?)
     `);
-
-    const p1 = insertProject.run(
-      "YDevHub Komuta Merkezi",
-      "ydevhub",
-      "Kişisel projeleri, sunucu yapılandırmalarını, Kanban görevlerini ve teknik dokümantasyonları tek noktadan yöneten yeni nesil geliştirici platformu.",
-      "active",
-      "critical",
-      JSON.stringify(["Next.js 15", "TypeScript", "SQLite (Native)", "Docker", "TailwindCSS", "Watchtower"]),
-      "https://github.com/YagYz/YDevHub",
-      "http://localhost:3000",
-      "/mnt/Depo/Projeler/YDevHub",
-      "127.0.0.1",
-      "3000",
-      "ydevhub-app",
-      "#6366f1",
-      1
+    insertCmd.run(
+      pid,
+      "Docker Konteynerlerini Yeniden Başlat & Derle",
+      "docker compose up -d --build",
+      "docker"
     );
-
-    const p2 = insertProject.run(
-      "YSentry Monitoring",
-      "ysentry",
-      "Sunucu ve servis sağlığını takip eden güvenlik & log izleme aracı.",
-      "active",
-      "high",
-      JSON.stringify(["Go", "Docker", "Linux", "WebSockets"]),
-      "https://github.com/YagYz/YSentry",
-      "",
-      "/mnt/Depo/Projeler/YSentry",
-      "192.168.1.100",
-      "8080",
-      "ysentry-core",
-      "#10b981",
-      1
+    insertCmd.run(
+      pid,
+      "Canlı Konteyner Loglarını İzle",
+      "docker logs -f --tail 100 ydevhub-app",
+      "docker"
     );
-
-    const p3 = insertProject.run(
-      "3+1 Web Platformu",
-      "3arti1-web",
-      "Web tabanlı modern içerik ve yönetim uygulaması.",
-      "planning",
-      "medium",
-      JSON.stringify(["React", "Node.js", "MSSQL", "Docker"]),
-      "",
-      "",
-      "/mnt/Depo/Projeler/3arti1_web",
-      "192.168.1.100",
-      "5000",
-      "3arti1-web",
-      "#f59e0b",
-      0
+    insertCmd.run(
+      pid,
+      "SQLite Veritabanını Sıcak Yedekle",
+      "cp ./data/ydevhub.db ./data/ydevhub_backup_$(date +%F_%H-%M).db",
+      "system"
     );
-
-    const insertTask = db.prepare(`
-      INSERT INTO tasks (project_id, title, description, status, priority, tag)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    insertTask.run(Number(p1.lastInsertRowid), "GitHub Actions CI/CD ve GHCR entegrasyonu", "Main branch push sonrası otomatik Docker imajı derlenmesi", "done", "high", "devops");
-    insertTask.run(Number(p1.lastInsertRowid), "Watchtower ile otomatik konteyner güncelleme", "Sunucu tarafında yeni imaj çıktığında sıfır kesintiyle güncelleme", "in_progress", "urgent", "devops");
-    insertTask.run(Number(p1.lastInsertRowid), "Proje bazlı .env ve SSH/Port kasası", "Sunucu bilgilerini ve gizli anahtarları kopyalanabilir şekilde saklama", "done", "medium", "feature");
-    insertTask.run(Number(p2.lastInsertRowid), "MSSQL Docker konteyner bağlantı testi", "Mevcut MSSQL konteyneri ile sağlık kontrolü entegrasyonu", "todo", "medium", "feature");
-
-    const insertNote = db.prepare(`
-      INSERT INTO notes (project_id, title, content, category, pinned)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
-    insertNote.run(
-      Number(p1.lastInsertRowid),
-      "🚀 Otomatik Deploy & Watchtower Kurulum Rehberi",
-      `# GitHub + Docker + Watchtower Otomatik Güncelleme Sistemi
-
-Bu sistem sayesinde bilgisayarında kodu yazıp \`git push origin main\` yaptığın anda:
-
-1. **GitHub Actions** devreye girer ve projeyi Docker imajı olarak paketleyip **GitHub Container Registry (GHCR)** üzerine yükler.
-2. Kendi sunucunda çalışan **Watchtower** konteyneri her 60 saniyede bir (veya belirlediğin sürede) GHCR'ı kontrol eder.
-3. Yeni imaj algılandığında mevcut konteyneri durdurur, veritabanı volume'ünü (\`/app/data\`) koruyarak yeni sürümü ayağa kaldırır!
-
-### Yararlı Docker Komutları
-\`\`\`bash
-# Sistemi başlatmak için
-docker compose up -d --build
-
-# Logları canlı izlemek için
-docker logs -f ydevhub-app
-
-# SQLite veritabanını yedeklemek için
-cp ./data/ydevhub.db ./data/ydevhub_backup_$(date +%F).db
-\`\`\``,
-      "server",
-      1
+    insertCmd.run(
+      pid,
+      "Git Dev Dalından Main Dalına Merge (--no-ff)",
+      "git checkout main && git merge --no-ff dev && git push origin main && git checkout dev",
+      "git"
     );
+  }
 
-    insertNote.run(
-      Number(p2.lastInsertRowid),
-      "🗄️ Mevcut MSSQL Docker Bağlantı Notları",
-      `# MSSQL Server Docker Bağlantısı
+  // Populate starter README on first project if empty
+  const p1Row = db
+    .prepare("SELECT id, readme_md FROM projects WHERE slug = 'ydevhub' LIMIT 1")
+    .get() as { id: number; readme_md: string } | undefined;
+  if (p1Row && !p1Row.readme_md) {
+    db.prepare("UPDATE projects SET readme_md = ? WHERE id = ?").run(
+      `# ⚡ YDevHub Mimari & Homelab Dokümanı
 
-Sunucudaki mevcut MSSQL konteynerine diğer konteynerlerden erişmek için aynı Docker network'ünde olmaları yeterlidir:
+Bu ekran üzerinden projeye ait **README.md** dosyasını görsel olarak okuyabilir, bilgisayardan \`.md\` dosyası yükleyebilir veya ekran görüntüleri ekleyebilirsin.
 
-\`\`\`yaml
-networks:
-  default:
-    external: true
-    name: sql_network
-\`\`\`
+## Mimari Bileşenler
+- **Uygulama Katmanı:** Next.js 15 App Router (Standalone Docker)
+- **Veritabanı:** Yerleşik \`node:sqlite\` (WAL Modu)
+- **Görsel Depolama:** \`/app/data/uploads\` (Kalıcı Docker Volume)
 
-**Varsayılan Port:** \`1433\`
-**Connection String Örneği:**
-\`Server=mssql-container,1433;Database=Master;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True;\``,
-      "architecture",
-      1
+## Hızlı Kontrol Listesi
+- [x] GitHub Actions CI/CD (\`dev\` & \`main\`)
+- [x] Yönetici Şifre & Brute-Force Koruması
+- [x] Görsel Markdown & Ekran Görüntüsü Galerisi
+- [ ] Homelab Reverse Proxy & SSL Tanımlaması`,
+      p1Row.id
     );
-
-    const insertConfig = db.prepare(`
-      INSERT INTO configs (project_id, label, key_name, value_content, is_secret, environment)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    insertConfig.run(Number(p1.lastInsertRowid), "Uygulama Portu", "PORT", "3000", 0, "production");
-    insertConfig.run(Number(p1.lastInsertRowid), "SQLite Veri Yolu", "DB_PATH", "/app/data/ydevhub.db", 0, "production");
-    insertConfig.run(Number(p1.lastInsertRowid), "Watchtower Kontrol Süresi (sn)", "WATCHTOWER_POLL_INTERVAL", "60", 0, "production");
-    insertConfig.run(Number(p2.lastInsertRowid), "MSSQL Bağlantı Cümlesi", "MSSQL_CONNECTION_STRING", "Server=localhost,1433;Database=AppDB;User Id=sa;Password=ChangeMe123!;", 1, "production");
   }
 }

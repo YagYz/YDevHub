@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   FolderGit2,
   Kanban,
@@ -31,13 +31,23 @@ import {
   ShieldCheck,
   Activity,
   Download,
+  Upload,
+  Image as ImageIcon,
+  BookOpen,
+  Columns,
+  Code2,
+  Command,
+  Maximize2,
 } from "lucide-react";
+import MarkdownViewer from "@/components/MarkdownViewer";
 
 type Project = {
   id: number;
   name: string;
   slug: string;
   description: string;
+  readme_md: string;
+  cover_image: string;
   status: "active" | "planning" | "paused" | "completed";
   priority: "low" | "medium" | "high" | "critical";
   tech_stack: string[];
@@ -50,6 +60,23 @@ type Project = {
   color: string;
   pinned: boolean;
   updated_at: string;
+};
+
+type ProjectImage = {
+  id: number;
+  project_id: number;
+  title: string;
+  image_url: string;
+  created_at: string;
+};
+
+type QuickCommand = {
+  id: number;
+  project_id: number | null;
+  title: string;
+  command_text: string;
+  category: string;
+  created_at: string;
 };
 
 type Task = {
@@ -84,10 +111,22 @@ type ConfigItem = {
 };
 
 const STATUS_MAP: Record<string, { label: string; badge: string }> = {
-  active: { label: "Aktif Geliştirme", badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
-  planning: { label: "Planlama", badge: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
-  paused: { label: "Askıda", badge: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
-  completed: { label: "Tamamlandı", badge: "bg-indigo-500/15 text-indigo-400 border-indigo-500/30" },
+  active: {
+    label: "Aktif Geliştirme",
+    badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  },
+  planning: {
+    label: "Planlama",
+    badge: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  },
+  paused: {
+    label: "Askıda",
+    badge: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+  },
+  completed: {
+    label: "Tamamlandı",
+    badge: "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+  },
 };
 
 const PRIORITY_MAP: Record<string, { label: string; color: string }> = {
@@ -109,18 +148,24 @@ export default function YDevHubPage() {
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [securitySavedMsg, setSecuritySavedMsg] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"dashboard" | "kanban" | "notes" | "vault" | "cicd">("dashboard");
+  const [activeTab, setActiveTab] = useState<
+    "dashboard" | "kanban" | "notes" | "commands" | "vault" | "cicd"
+  >("dashboard");
   const [selectedProjectId, setSelectedProjectId] = useState<number | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectImages, setProjectImages] = useState<ProjectImage[]>([]);
+  const [commands, setCommands] = useState<QuickCommand[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [configs, setConfigs] = useState<ConfigItem[]>([]);
 
   // Health / Ping states
-  const [healthStatus, setHealthStatus] = useState<Record<number, { online: boolean; latencyMs: number }>>({});
+  const [healthStatus, setHealthStatus] = useState<
+    Record<number, { online: boolean; latencyMs: number }>
+  >({});
   const [checkingHealth, setCheckingHealth] = useState(false);
 
   // Active note for editor
@@ -129,12 +174,30 @@ export default function YDevHubPage() {
   const [noteContent, setNoteContent] = useState("");
   const [noteCategory, setNoteCategory] = useState("architecture");
   const [noteProjectId, setNoteProjectId] = useState<number | null>(null);
+  const [noteViewMode, setNoteViewMode] = useState<"split" | "preview" | "edit">("split");
+
+  // Project Detail Drawer / Workspace Modal
+  const [detailProjectId, setDetailProjectId] = useState<number | null>(null);
+  const [detailSubTab, setDetailSubTab] = useState<"readme" | "gallery" | "commands">("readme");
+  const [detailReadmeMode, setDetailReadmeMode] = useState<"preview" | "split" | "edit">("preview");
+  const [detailReadmeText, setDetailReadmeText] = useState("");
+  const [galleryImageTitle, setGalleryImageTitle] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  // File input refs
+  const noteMdInputRef = useRef<HTMLInputElement | null>(null);
+  const noteImgInputRef = useRef<HTMLInputElement | null>(null);
+  const projectMdInputRef = useRef<HTMLInputElement | null>(null);
+  const projectImgInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryImgInputRef = useRef<HTMLInputElement | null>(null);
 
   // Modals
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showCommandModal, setShowCommandModal] = useState(false);
 
   // Vault visibility & copy states
   const [visibleSecrets, setVisibleSecrets] = useState<Record<number, boolean>>({});
@@ -144,6 +207,8 @@ export default function YDevHubPage() {
   const [pForm, setPForm] = useState({
     name: "",
     description: "",
+    readme_md: "",
+    cover_image: "",
     status: "active",
     priority: "high",
     tech_stack: "",
@@ -176,6 +241,19 @@ export default function YDevHubPage() {
     is_secret: true,
     environment: "production",
   });
+
+  // Command Form State
+  const [cmdForm, setCmdForm] = useState({
+    project_id: "" as string | number,
+    title: "",
+    command_text: "",
+    category: "docker",
+  });
+
+  const detailProject = useMemo(
+    () => projects.find((p) => p.id === detailProjectId) || null,
+    [projects, detailProjectId]
+  );
 
   const checkServersHealth = async (projectList: Project[]) => {
     setCheckingHealth(true);
@@ -214,8 +292,10 @@ export default function YDevHubPage() {
         return;
       }
       const data = await res.json();
-      const loadedProjects = data.projects || [];
+      const loadedProjects: Project[] = data.projects || [];
       setProjects(loadedProjects);
+      setProjectImages(data.projectImages || []);
+      setCommands(data.commands || []);
       setTasks(data.tasks || []);
       setNotes(data.notes || []);
       setConfigs(data.configs || []);
@@ -255,6 +335,65 @@ export default function YDevHubPage() {
         setLoading(false);
       });
   }, []);
+
+  const uploadImageFile = async (file: File): Promise<string | null> => {
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Görsel yüklenemedi.");
+        return null;
+      }
+      return data.url as string;
+    } catch {
+      alert("Görsel yükleme sırasında hata oluştu.");
+      return null;
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // Handle Ctrl+V image paste in Markdown editors
+  const handleMarkdownPaste = async (
+    e: React.ClipboardEvent<HTMLTextAreaElement>,
+    currentValue: string,
+    setter: (val: string) => void
+  ) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        if (!file) return;
+        const uploadedUrl = await uploadImageFile(file);
+        if (uploadedUrl) {
+          const mdImage = `\n![Ekran Görüntüsü](${uploadedUrl})\n`;
+          setter(currentValue + mdImage);
+        }
+        return;
+      }
+    }
+  };
+
+  const downloadMarkdownFile = (filename: string, content: string) => {
+    const safeName = filename.toLowerCase().endsWith(".md")
+      ? filename
+      : `${filename.replace(/[^a-zA-Z0-9_-]+/g, "-")}.md`;
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = safeName;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -305,6 +444,8 @@ export default function YDevHubPage() {
     const backup = {
       exported_at: new Date().toISOString(),
       projects,
+      projectImages,
+      commands,
       tasks,
       notes,
       configs,
@@ -324,6 +465,13 @@ export default function YDevHubPage() {
     setNoteContent(n.content);
     setNoteCategory(n.category);
     setNoteProjectId(n.project_id);
+  };
+
+  const openProjectWorkspace = (p: Project, initialSubTab: "readme" | "gallery" | "commands" = "readme") => {
+    setDetailProjectId(p.id);
+    setDetailSubTab(initialSubTab);
+    setDetailReadmeText(p.readme_md || `# ${p.name}\n\n${p.description || ""}`);
+    setDetailReadmeMode("preview");
   };
 
   const apiCall = async (entity: string, action: string, payload: any) => {
@@ -374,6 +522,17 @@ export default function YDevHubPage() {
     });
   }, [notes, selectedProjectId, searchQuery]);
 
+  const filteredCommands = useMemo(() => {
+    return commands.filter((c) => {
+      if (selectedProjectId !== "all" && c.project_id !== selectedProjectId) return false;
+      if (!searchQuery.trim()) return true;
+      return (
+        c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.command_text.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    });
+  }, [commands, selectedProjectId, searchQuery]);
+
   const filteredConfigs = useMemo(() => {
     return configs.filter((c) => {
       if (selectedProjectId !== "all" && c.project_id !== selectedProjectId) return false;
@@ -395,6 +554,8 @@ export default function YDevHubPage() {
     setPForm({
       name: "",
       description: "",
+      readme_md: "",
+      cover_image: "",
       status: "active",
       priority: "high",
       tech_stack: "Next.js, Docker, TypeScript",
@@ -415,6 +576,8 @@ export default function YDevHubPage() {
     setPForm({
       name: p.name,
       description: p.description,
+      readme_md: p.readme_md || "",
+      cover_image: p.cover_image || "",
       status: p.status,
       priority: p.priority,
       tech_stack: p.tech_stack.join(", "),
@@ -494,9 +657,10 @@ export default function YDevHubPage() {
   const handleCreateNewNote = () => {
     setSelectedNote(null);
     setNoteTitle("Yeni Teknik Not / Doküman");
-    setNoteContent("# Başlık\n\nProje ile ilgili mimari kararlar, komutlar veya notlar...");
+    setNoteContent("# Başlık\n\nProje ile ilgili mimari kararlar, komutlar veya görseller...");
     setNoteCategory("architecture");
     setNoteProjectId(selectedProjectId === "all" ? (projects[0]?.id ?? null) : selectedProjectId);
+    setNoteViewMode("split");
   };
 
   const handleSaveConfig = async (e: React.FormEvent) => {
@@ -516,6 +680,21 @@ export default function YDevHubPage() {
     setShowConfigModal(false);
   };
 
+  const handleSaveCommand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await apiCall("command", "create", {
+      ...cmdForm,
+      project_id: cmdForm.project_id ? Number(cmdForm.project_id) : null,
+    });
+    setCmdForm({
+      project_id: selectedProjectId === "all" ? "" : selectedProjectId,
+      title: "",
+      command_text: "",
+      category: "docker",
+    });
+    setShowCommandModal(false);
+  };
+
   // Show sleek Login Screen if not authenticated
   if (authChecked && !authenticated) {
     return (
@@ -527,7 +706,9 @@ export default function YDevHubPage() {
             </div>
             <h1 className="text-xl font-bold text-white">YDevHub Komuta Merkezi</h1>
             <p className="text-xs text-zinc-400">
-              Proje verilerine, sunucu yapılandırmalarına ve <code className="text-indigo-400">.env</code> kasasına erişmek için yönetici şifresini girin.
+              Proje verilerine, görsellere, sunucu yapılandırmalarına ve{" "}
+              <code className="text-indigo-400">.env</code> kasasına erişmek için yönetici şifresini
+              girin.
             </p>
           </div>
 
@@ -563,7 +744,8 @@ export default function YDevHubPage() {
 
           <div className="pt-3 border-t border-zinc-800/80 text-center">
             <p className="text-[11px] text-zinc-500">
-              İlk kurulum varsayılan şifresi: <code className="text-zinc-300 font-mono">yagyz123</code> (İçeriden değiştirebilirsin)
+              PBKDF2 & Brute-Force Koruması Aktif • İlk Kurulum Şifresi:{" "}
+              <code className="text-zinc-300 font-mono">yagyz123</code>
             </p>
           </div>
         </div>
@@ -586,10 +768,10 @@ export default function YDevHubPage() {
                 <h1 className="font-bold text-base tracking-tight text-white flex items-center gap-1.5">
                   YDevHub
                   <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    v1.2
+                    v2.0
                   </span>
                 </h1>
-                <p className="text-xs text-zinc-400">Proje & Sunucu Üssü</p>
+                <p className="text-xs text-zinc-400">Proje & Homelab Üssü</p>
               </div>
             </div>
           </div>
@@ -609,7 +791,7 @@ export default function YDevHubPage() {
             >
               <span className="flex items-center gap-2.5">
                 <FolderGit2 className="w-4 h-4" />
-                Projeler & Künye
+                Projeler & Galeri
               </span>
               <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400">
                 {projects.length}
@@ -643,10 +825,27 @@ export default function YDevHubPage() {
             >
               <span className="flex items-center gap-2.5">
                 <FileText className="w-4 h-4" />
-                Notlar & Wiki
+                Görsel Notlar (.md)
               </span>
               <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400">
                 {notes.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("commands")}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                activeTab === "commands"
+                  ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/30"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/70"
+              }`}
+            >
+              <span className="flex items-center gap-2.5">
+                <Command className="w-4 h-4" />
+                Hızlı Komutlar (SSH)
+              </span>
+              <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400">
+                {commands.length}
               </span>
             </button>
 
@@ -755,7 +954,7 @@ export default function YDevHubPage() {
           <div className="flex items-center justify-between text-xs">
             <span className="text-zinc-400 flex items-center gap-1.5">
               <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-              SQLite (WAL)
+              SQLite + Görsel Depo
             </span>
             <button
               onClick={handleExportBackup}
@@ -796,19 +995,21 @@ export default function YDevHubPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Proje, teknoloji, görev, not veya .env anahtarı ara..."
+              placeholder="Proje, teknoloji, görev, komut, not veya .env ara..."
               className="w-full bg-zinc-900/90 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500/60"
             />
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => checkServersHealth(projects)}
               disabled={checkingHealth}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium transition"
               title="Proje portlarının açık olup olmadığını kontrol et"
             >
-              <Activity className={`w-3.5 h-3.5 text-emerald-400 ${checkingHealth ? "animate-spin" : ""}`} />
+              <Activity
+                className={`w-3.5 h-3.5 text-emerald-400 ${checkingHealth ? "animate-spin" : ""}`}
+              />
               Portları Tara
             </button>
             <button
@@ -826,10 +1027,23 @@ export default function YDevHubPage() {
                 });
                 setShowTaskModal(true);
               }}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium transition"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium transition"
             >
               <Plus className="w-4 h-4 text-emerald-400" />
-              Görev Ekle
+              Görev
+            </button>
+            <button
+              onClick={() => {
+                setCmdForm({
+                  ...cmdForm,
+                  project_id: selectedProjectId === "all" ? "" : selectedProjectId,
+                });
+                setShowCommandModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium transition"
+            >
+              <Terminal className="w-3.5 h-3.5 text-sky-400" />
+              Komut
             </button>
             <button
               onClick={() => {
@@ -839,10 +1053,10 @@ export default function YDevHubPage() {
                 });
                 setShowConfigModal(true);
               }}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium transition"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium transition"
             >
               <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-              Bilgi / Env Ekle
+              Env
             </button>
           </div>
         </header>
@@ -856,7 +1070,8 @@ export default function YDevHubPage() {
                 <p className="text-xs text-zinc-400">Toplam Proje</p>
                 <p className="text-2xl font-bold text-white mt-1">{projects.length}</p>
                 <p className="text-[11px] text-emerald-400 mt-1">
-                  {projects.filter((p) => p.status === "active").length} aktif geliştiriliyor
+                  {projects.filter((p) => p.status === "active").length} aktif •{" "}
+                  {projectImages.length} görsel
                 </p>
               </div>
               <div className="w-11 h-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
@@ -871,7 +1086,8 @@ export default function YDevHubPage() {
                   {tasks.filter((t) => t.status !== "done").length}
                 </p>
                 <p className="text-[11px] text-amber-400 mt-1">
-                  {tasks.filter((t) => t.status === "in_progress").length} şu an üzerinde çalışılıyor
+                  {tasks.filter((t) => t.status === "in_progress").length} şu an üzerinde
+                  çalışılıyor
                 </p>
               </div>
               <div className="w-11 h-11 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
@@ -881,10 +1097,10 @@ export default function YDevHubPage() {
 
             <div className="p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex items-center justify-between">
               <div>
-                <p className="text-xs text-zinc-400">Teknik Not & Wiki</p>
+                <p className="text-xs text-zinc-400">Görsel Not & .md Wiki</p>
                 <p className="text-2xl font-bold text-white mt-1">{notes.length}</p>
                 <p className="text-[11px] text-sky-400 mt-1">
-                  Markdown & kod şablonları
+                  Canlı önizleme & .md içe/dışa aktar
                 </p>
               </div>
               <div className="w-11 h-11 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
@@ -894,10 +1110,12 @@ export default function YDevHubPage() {
 
             <div className="p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex items-center justify-between">
               <div>
-                <p className="text-xs text-zinc-400">Sunucu & Env Kasası</p>
-                <p className="text-2xl font-bold text-white mt-1">{configs.length}</p>
+                <p className="text-xs text-zinc-400">Komut & Env Kasası</p>
+                <p className="text-2xl font-bold text-white mt-1">
+                  {configs.length + commands.length}
+                </p>
                 <p className="text-[11px] text-purple-400 mt-1">
-                  Port, bağlantı ve parametreler
+                  {commands.length} hızlı komut • {configs.length} gizli env
                 </p>
               </div>
               <div className="w-11 h-11 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
@@ -911,9 +1129,13 @@ export default function YDevHubPage() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-white">Proje Portföyü & Teknik Künye</h2>
+                  <h2 className="text-lg font-semibold text-white">
+                    Proje Portföyü, Görsel Galeri & README.md
+                  </h2>
                   <p className="text-xs text-zinc-400">
-                    Geliştirdiğin tüm sistemlerin dizin, port, canlı erişim durumu, Docker konteyner ve GitHub bağlantıları
+                    Projeye tıklayarak <strong className="text-zinc-200">README.md</strong>{" "}
+                    dokümanını açabilir, bilgisayardan <code className="text-indigo-300">.md</code>{" "}
+                    dosyası veya ekran görüntüleri yükleyebilirsin
                   </p>
                 </div>
               </div>
@@ -927,30 +1149,53 @@ export default function YDevHubPage() {
                       ? Math.round((doneTasks / projectTasks.length) * 100)
                       : 0;
                   const pHealth = healthStatus[project.id];
+                  const pImgs = projectImages.filter((img) => img.project_id === project.id);
+                  const coverUrl = project.cover_image || pImgs[0]?.image_url || "";
 
                   return (
                     <div
                       key={project.id}
-                      className="group rounded-2xl bg-zinc-900/60 border border-zinc-800/90 hover:border-zinc-700 transition-all flex flex-col justify-between overflow-hidden"
+                      className="group rounded-2xl bg-zinc-900/60 border border-zinc-800/90 hover:border-indigo-500/40 transition-all flex flex-col justify-between overflow-hidden"
                     >
                       <div>
-                        {/* Color Accent Header */}
-                        <div
-                          className="h-1.5 w-full"
-                          style={{ backgroundColor: project.color }}
-                        />
+                        {/* Cover Image or Color Accent Header */}
+                        {coverUrl ? (
+                          <div
+                            onClick={() => openProjectWorkspace(project, "gallery")}
+                            className="relative h-36 w-full bg-zinc-950 overflow-hidden cursor-pointer border-b border-zinc-800/80"
+                          >
+                            <img
+                              src={coverUrl}
+                              alt={project.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition duration-500 opacity-90"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-transparent" />
+                            <span className="absolute bottom-2 right-2.5 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-sm text-[10px] font-mono text-zinc-200 flex items-center gap-1 border border-white/10">
+                              <ImageIcon className="w-3 h-3 text-indigo-400" /> {pImgs.length} Görsel
+                            </span>
+                          </div>
+                        ) : (
+                          <div
+                            className="h-1.5 w-full"
+                            style={{ backgroundColor: project.color }}
+                          />
+                        )}
+
                         <div className="p-5 space-y-4">
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <div className="flex items-center gap-2">
-                                <h3 className="font-semibold text-base text-white group-hover:text-indigo-300 transition">
+                                <h3
+                                  onClick={() => openProjectWorkspace(project, "readme")}
+                                  className="font-semibold text-base text-white group-hover:text-indigo-300 transition cursor-pointer"
+                                >
                                   {project.name}
                                 </h3>
                                 {project.pinned && (
                                   <Pin className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 mt-1.5">
+                              <div className="flex flex-wrap items-center gap-2 mt-1.5">
                                 <span
                                   className={`inline-block text-[11px] font-medium px-2.5 py-0.5 rounded-full border ${
                                     STATUS_MAP[project.status]?.badge || STATUS_MAP.active.badge
@@ -971,7 +1216,9 @@ export default function YDevHubPage() {
                                         pHealth.online ? "bg-emerald-400" : "bg-zinc-500"
                                       }`}
                                     />
-                                    {pHealth.online ? `Online (${pHealth.latencyMs}ms)` : "Port Kapalı"}
+                                    {pHealth.online
+                                      ? `Online (${pHealth.latencyMs}ms)`
+                                      : "Port Kapalı"}
                                   </span>
                                 )}
                               </div>
@@ -995,9 +1242,7 @@ export default function YDevHubPage() {
                                 <Pin className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() =>
-                                  apiCall("project", "delete", { id: project.id })
-                                }
+                                onClick={() => apiCall("project", "delete", { id: project.id })}
                                 className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 transition"
                                 title="Sil"
                               >
@@ -1006,7 +1251,7 @@ export default function YDevHubPage() {
                             </div>
                           </div>
 
-                          <p className="text-xs text-zinc-400 leading-relaxed line-clamp-3">
+                          <p className="text-xs text-zinc-400 leading-relaxed line-clamp-2">
                             {project.description || "Açıklama eklenmemiş."}
                           </p>
 
@@ -1051,7 +1296,9 @@ export default function YDevHubPage() {
                           {/* Task Progress Bar */}
                           <div className="space-y-1">
                             <div className="flex justify-between text-[11px] text-zinc-400">
-                              <span>Görev İlerlemesi ({doneTasks}/{projectTasks.length})</span>
+                              <span>
+                                Görev İlerlemesi ({doneTasks}/{projectTasks.length})
+                              </span>
                               <span className="font-mono">{progress}%</span>
                             </div>
                             <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
@@ -1065,7 +1312,7 @@ export default function YDevHubPage() {
                       </div>
 
                       {/* Card Footer Links */}
-                      <div className="px-5 py-3 bg-zinc-950/50 border-t border-zinc-800/80 flex items-center justify-between text-xs">
+                      <div className="px-5 py-3 bg-zinc-950/60 border-t border-zinc-800/80 flex items-center justify-between text-xs">
                         <div className="flex items-center gap-3">
                           {project.repo_url && (
                             <a
@@ -1091,15 +1338,23 @@ export default function YDevHubPage() {
                           )}
                         </div>
 
-                        <button
-                          onClick={() => {
-                            setSelectedProjectId(project.id);
-                            setActiveTab("notes");
-                          }}
-                          className="text-zinc-400 hover:text-white flex items-center gap-1"
-                        >
-                          Detay & Notlar <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => openProjectWorkspace(project, "gallery")}
+                            className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 flex items-center gap-1 transition"
+                            title="Görsel Galeri"
+                          >
+                            <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                            <span>{pImgs.length}</span>
+                          </button>
+                          <button
+                            onClick={() => openProjectWorkspace(project, "readme")}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 font-medium flex items-center gap-1 transition"
+                          >
+                            <BookOpen className="w-3.5 h-3.5" />
+                            README & Detay
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1157,14 +1412,20 @@ export default function YDevHubPage() {
                               <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-medium">
                                 {getProjectName(task.project_id)}
                               </span>
-                              <span className={`font-mono ${PRIORITY_MAP[task.priority]?.color || "text-zinc-400"}`}>
+                              <span
+                                className={`font-mono ${
+                                  PRIORITY_MAP[task.priority]?.color || "text-zinc-400"
+                                }`}
+                              >
                                 {PRIORITY_MAP[task.priority]?.label || task.priority}
                               </span>
                             </div>
 
                             <p className="text-sm font-medium text-zinc-100">{task.title}</p>
                             {task.description && (
-                              <p className="text-xs text-zinc-400 line-clamp-2">{task.description}</p>
+                              <p className="text-xs text-zinc-400 line-clamp-2">
+                                {task.description}
+                              </p>
                             )}
 
                             <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between gap-1">
@@ -1201,18 +1462,18 @@ export default function YDevHubPage() {
             </div>
           )}
 
-          {/* TAB 3: NOTES & WIKI */}
+          {/* TAB 3: VISUAL NOTES & MARKDOWN WIKI */}
           {activeTab === "notes" && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-220px)]">
               {/* Note List */}
-              <div className="lg:col-span-4 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col overflow-hidden">
+              <div className="lg:col-span-3 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col overflow-hidden">
                 <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-white">Proje Notları & Dokümanlar</h3>
+                  <h3 className="text-sm font-semibold text-white">Notlar & .md Dokümanlar</h3>
                   <button
                     onClick={handleCreateNewNote}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition"
                   >
-                    <Plus className="w-3.5 h-3.5" /> Yeni Not
+                    <Plus className="w-3.5 h-3.5" /> Yeni
                   </button>
                 </div>
 
@@ -1242,42 +1503,129 @@ export default function YDevHubPage() {
                 </div>
               </div>
 
-              {/* Note Editor & Reader */}
-              <div className="lg:col-span-8 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col overflow-hidden">
-                <div className="p-4 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+              {/* Visual Markdown Split Editor & Reader */}
+              <div className="lg:col-span-9 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col overflow-hidden">
+                {/* Editor Toolbar */}
+                <div className="p-3.5 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 bg-zinc-900/80">
                   <input
                     type="text"
                     value={noteTitle}
                     onChange={(e) => setNoteTitle(e.target.value)}
-                    placeholder="Not Başlığı..."
-                    className="bg-transparent text-base font-semibold text-white focus:outline-none flex-1"
+                    placeholder="Not / Doküman Başlığı..."
+                    className="bg-transparent text-base font-semibold text-white focus:outline-none flex-1 min-w-[180px]"
                   />
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {/* View Mode Switcher */}
+                    <div className="flex items-center rounded-lg bg-zinc-950 p-0.5 border border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => setNoteViewMode("preview")}
+                        className={`px-2.5 py-1 rounded-md text-xs flex items-center gap-1 transition ${
+                          noteViewMode === "preview"
+                            ? "bg-indigo-600 text-white"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <BookOpen className="w-3.5 h-3.5" /> Görsel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNoteViewMode("split")}
+                        className={`px-2.5 py-1 rounded-md text-xs flex items-center gap-1 transition ${
+                          noteViewMode === "split"
+                            ? "bg-indigo-600 text-white"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <Columns className="w-3.5 h-3.5" /> Split
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNoteViewMode("edit")}
+                        className={`px-2.5 py-1 rounded-md text-xs flex items-center gap-1 transition ${
+                          noteViewMode === "edit"
+                            ? "bg-indigo-600 text-white"
+                            : "text-zinc-400 hover:text-white"
+                        }`}
+                      >
+                        <Code2 className="w-3.5 h-3.5" /> Markdown
+                      </button>
+                    </div>
+
+                    {/* Hidden inputs for .md and image upload */}
+                    <input
+                      ref={noteMdInputRef}
+                      type="file"
+                      accept=".md,.markdown,.txt"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const text = await file.text();
+                        setNoteTitle(file.name.replace(/\.(md|markdown|txt)$/i, ""));
+                        setNoteContent(text);
+                        e.target.value = "";
+                      }}
+                    />
+                    <input
+                      ref={noteImgInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const url = await uploadImageFile(file);
+                        if (url) {
+                          setNoteContent((prev) => `${prev}\n![${file.name}](${url})\n`);
+                        }
+                        e.target.value = "";
+                      }}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => noteMdInputRef.current?.click()}
+                      className="px-2.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 flex items-center gap-1 transition"
+                      title="Bilgisayardan .md dosyası yükle"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-indigo-400" /> .md Yükle
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => downloadMarkdownFile(noteTitle || "dokuman", noteContent)}
+                      className="px-2.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 flex items-center gap-1 transition"
+                      title="Bu notu .md dosyası olarak bilgisayara indir"
+                    >
+                      <Download className="w-3.5 h-3.5 text-emerald-400" /> .md İndir
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={uploadingImage}
+                      onClick={() => noteImgInputRef.current?.click()}
+                      className="px-2.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 flex items-center gap-1 transition"
+                      title="Not içerisine görsel/ekran görüntüsü yükle (veya doğrudan Ctrl+V yapıştır)"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                      {uploadingImage ? "Yükleniyor..." : "Görsel Ekle"}
+                    </button>
+
                     <select
                       value={noteProjectId || ""}
                       onChange={(e) =>
                         setNoteProjectId(e.target.value ? Number(e.target.value) : null)
                       }
-                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300"
+                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-300"
                     >
-                      <option value="">Genel (Tüm Projeler)</option>
+                      <option value="">Genel</option>
                       {projects.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
                         </option>
                       ))}
-                    </select>
-
-                    <select
-                      value={noteCategory}
-                      onChange={(e) => setNoteCategory(e.target.value)}
-                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300"
-                    >
-                      <option value="architecture">Mimari</option>
-                      <option value="server">Sunucu & Docker</option>
-                      <option value="snippet">Kod & SQL</option>
-                      <option value="idea">Fikir / Plan</option>
                     </select>
 
                     <button
@@ -1301,17 +1649,126 @@ export default function YDevHubPage() {
                   </div>
                 </div>
 
-                <textarea
-                  value={noteContent}
-                  onChange={(e) => setNoteContent(e.target.value)}
-                  placeholder="Markdown formatında proje notlarını, sunucu komutlarını veya veritabanı şemalarını buraya yazabilirsin..."
-                  className="flex-1 w-full p-5 bg-zinc-950/60 text-zinc-200 font-mono text-sm leading-relaxed focus:outline-none resize-none"
-                />
+                {/* Split / Preview / Edit Body */}
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
+                  {(noteViewMode === "edit" || noteViewMode === "split") && (
+                    <div
+                      className={`${
+                        noteViewMode === "split"
+                          ? "md:col-span-6 border-r border-zinc-800"
+                          : "md:col-span-12"
+                      } flex flex-col h-full overflow-hidden`}
+                    >
+                      <div className="px-4 py-1.5 bg-zinc-950 border-b border-zinc-800/80 text-[11px] text-zinc-500 flex items-center justify-between">
+                        <span>MARKDOWN EDİTÖRÜ</span>
+                        <span>İpucu: Ekran görüntüsünü doğrudan Ctrl+V ile yapıştırabilirsin</span>
+                      </div>
+                      <textarea
+                        value={noteContent}
+                        onChange={(e) => setNoteContent(e.target.value)}
+                        onPaste={(e) => handleMarkdownPaste(e, noteContent, setNoteContent)}
+                        placeholder="Markdown formatında proje notlarını yaz veya bilgisayardan .md dosyası yükle..."
+                        className="flex-1 w-full p-5 bg-zinc-950/60 text-zinc-200 font-mono text-sm leading-relaxed focus:outline-none resize-none"
+                      />
+                    </div>
+                  )}
+
+                  {(noteViewMode === "preview" || noteViewMode === "split") && (
+                    <div
+                      className={`${
+                        noteViewMode === "split" ? "md:col-span-6" : "md:col-span-12"
+                      } flex flex-col h-full overflow-hidden bg-zinc-950/30`}
+                    >
+                      <div className="px-4 py-1.5 bg-zinc-950 border-b border-zinc-800/80 text-[11px] text-zinc-500">
+                        CANLI GÖRSEL ÖNİZLEME (.MD)
+                      </div>
+                      <div className="flex-1 p-6 overflow-y-auto">
+                        <MarkdownViewer
+                          content={noteContent}
+                          onImageClick={(url) => setLightboxUrl(url)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
 
-          {/* TAB 4: CONFIG & ENV VAULT */}
+          {/* TAB 4: QUICK SSH / DOCKER COMMANDS LIBRARY */}
+          {activeTab === "commands" && (
+            <div className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-white">
+                    Hızlı SSH, Docker & Git Komut Kütüphanesi
+                  </h2>
+                  <p className="text-xs text-zinc-400">
+                    Homelab sunucunda ve projelerinde sık kullandığın terminal komutlarını tek tıkla
+                    kopyala
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowCommandModal(true)}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" /> Yeni Komut Ekle
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredCommands.map((cmd) => (
+                  <div
+                    key={cmd.id}
+                    className="p-4 rounded-2xl bg-zinc-900/60 border border-zinc-800 flex flex-col justify-between gap-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                            {getProjectName(cmd.project_id)}
+                          </span>
+                          <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                            {cmd.category}
+                          </span>
+                        </div>
+                        <h3 className="text-sm font-semibold text-white mt-2">{cmd.title}</h3>
+                      </div>
+
+                      <button
+                        onClick={() => apiCall("command", "delete", { id: cmd.id })}
+                        className="p-1.5 text-zinc-500 hover:text-rose-400 transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800/90 flex items-center justify-between gap-3">
+                      <code className="text-xs font-mono text-emerald-300 overflow-x-auto">
+                        {cmd.command_text}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(cmd.command_text, `cmd-${cmd.id}`)}
+                        className="shrink-0 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 flex items-center gap-1 transition"
+                      >
+                        {copiedKey === `cmd-${cmd.id}` ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" /> Kopyalandı
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" /> Kopyala
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: CONFIG & ENV VAULT */}
           {activeTab === "vault" && (
             <div className="space-y-5">
               <div className="flex items-center justify-between">
@@ -1320,7 +1777,8 @@ export default function YDevHubPage() {
                     Ortam Değişkenleri (.env), Port & Bağlantı Kasası
                   </h2>
                   <p className="text-xs text-zinc-400">
-                    Projelerin için gerekli veritabanı bağlantı cümleleri, portlar, API anahtarları ve sunucu parametreleri
+                    Projelerin için gerekli veritabanı bağlantı cümleleri, portlar, API anahtarları
+                    ve sunucu parametreleri
                   </p>
                 </div>
               </div>
@@ -1377,9 +1835,7 @@ export default function YDevHubPage() {
                               </button>
                             )}
                             <button
-                              onClick={() =>
-                                copyToClipboard(cfg.value_content, `cfg-${cfg.id}`)
-                              }
+                              onClick={() => copyToClipboard(cfg.value_content, `cfg-${cfg.id}`)}
                               className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition"
                               title="Kopyala"
                             >
@@ -1390,9 +1846,7 @@ export default function YDevHubPage() {
                               )}
                             </button>
                             <button
-                              onClick={() =>
-                                apiCall("config", "delete", { id: cfg.id })
-                              }
+                              onClick={() => apiCall("config", "delete", { id: cfg.id })}
                               className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 transition"
                               title="Sil"
                             >
@@ -1408,7 +1862,7 @@ export default function YDevHubPage() {
             </div>
           )}
 
-          {/* TAB 5: DOCKER & CI/CD AUTO DEPLOY GUIDE */}
+          {/* TAB 6: DOCKER & CI/CD AUTO DEPLOY GUIDE */}
           {activeTab === "cicd" && (
             <div className="space-y-6 max-w-4xl">
               <div className="p-6 rounded-2xl bg-gradient-to-br from-indigo-950/50 via-zinc-900 to-zinc-900 border border-indigo-500/30 space-y-4">
@@ -1418,13 +1872,11 @@ export default function YDevHubPage() {
                   </div>
                   <div>
                     <h2 className="text-lg font-bold text-white">
-                      GitHub Push / Merge Sonrası Otomatik Sunucu Güncelleme Mimarisi
+                      Homelab & Otomatik Güncelleme Mimarisi (Pentest Sertleştirmeli)
                     </h2>
                     <p className="text-xs text-zinc-300">
-                      Bu proje için hazırlanan <code className="text-indigo-300">Dockerfile</code>,{" "}
-                      <code className="text-indigo-300">docker-compose.yml</code> ve{" "}
-                      <code className="text-indigo-300">.github/workflows/deploy.yml</code> dosyaları
-                      klasöründe hazır!
+                      PBKDF2 şifreleme, Brute-Force engelleme, Magic-Byte görsel doğrulama ve CSP
+                      güvenlik başlıkları aktif!
                     </p>
                   </div>
                 </div>
@@ -1434,49 +1886,444 @@ export default function YDevHubPage() {
                     <span className="text-xs font-mono text-indigo-400">1. Adım: dev Dalı</span>
                     <p className="text-sm font-semibold text-white">Geliştir & Test Et</p>
                     <p className="text-xs text-zinc-400">
-                      Yeni özellikleri <code className="text-zinc-200">dev</code> dalında geliştir. GitHub Actions derleme testini otomatik yapar.
+                      Yeni özellikleri <code className="text-zinc-200">dev</code> dalında geliştir.
+                      GitHub Actions derleme testini otomatik yapar.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-1.5">
                     <span className="text-xs font-mono text-emerald-400">2. Adım: main Merge</span>
                     <p className="text-sm font-semibold text-white">Bulutta Docker İmajı</p>
                     <p className="text-xs text-zinc-400">
-                      <code className="text-zinc-200">main</code> dalına merge ettiğinde GitHub imajı derler ve <code className="text-zinc-200">ghcr.io</code> adresine yükler.
+                      <code className="text-zinc-200">main</code> dalına merge ettiğinde GitHub
+                      imajı derler ve <code className="text-zinc-200">ghcr.io</code> adresine
+                      yükler.
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-1.5">
                     <span className="text-xs font-mono text-amber-400">3. Adım: Watchtower</span>
                     <p className="text-sm font-semibold text-white">Sıfır Dokunuşla Güncelleme</p>
                     <p className="text-xs text-zinc-400">
-                      Sunucundaki Watchtower yeni imajı algılar, SQLite veritabanını koruyarak
-                      konteyneri otomatik yeniler!
+                      Homelab sunucundaki Watchtower yeni imajı algılar, SQLite ve yüklenen
+                      görselleri (<code className="text-zinc-200">/app/data</code>) koruyarak
+                      günceller!
                     </p>
                   </div>
                 </div>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-zinc-900/50 border border-zinc-800 space-y-3">
-                <h3 className="text-sm font-semibold text-white">
-                  Hızlı Terminal Komutları (/mnt/Depo/Projeler/YDevHub)
-                </h3>
-                <pre className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed">
-{`# 1. Geliştirme dalında çalışıp pushlamak için:
-git checkout dev
-git add .
-git commit -m "feat: yeni geliştirme"
-git push origin dev
-
-# 2. Test sonrası Canlıya (main) Merge edip oto-güncellemeyi başlatmak için:
-git checkout main
-git merge dev
-git push origin main
-git checkout dev`}
-                </pre>
               </div>
             </div>
           )}
         </main>
       </div>
+
+      {/* PROJECT WORKSPACE / DETAIL MODAL (README.md + IMAGE GALLERY + QUICK COMMANDS) */}
+      {detailProject && (
+        <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-5xl w-full h-[88vh] flex flex-col overflow-hidden shadow-2xl">
+            {/* Workspace Header */}
+            <div className="p-5 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-4 bg-zinc-950/70">
+              <div className="flex items-center gap-3">
+                <span
+                  className="w-4 h-4 rounded-full shrink-0"
+                  style={{ backgroundColor: detailProject.color }}
+                />
+                <div>
+                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                    {detailProject.name}
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                      {detailProject.server_ip || "localhost"}:{detailProject.server_port || "3000"}
+                    </span>
+                  </h2>
+                  <p className="text-xs text-zinc-400">{detailProject.description}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="flex items-center rounded-xl bg-zinc-900 p-1 border border-zinc-800">
+                  <button
+                    onClick={() => setDetailSubTab("readme")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition ${
+                      detailSubTab === "readme"
+                        ? "bg-indigo-600 text-white"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    <BookOpen className="w-3.5 h-3.5" /> README.md
+                  </button>
+                  <button
+                    onClick={() => setDetailSubTab("gallery")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition ${
+                      detailSubTab === "gallery"
+                        ? "bg-indigo-600 text-white"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" /> Görsel Galeri (
+                    {projectImages.filter((i) => i.project_id === detailProject.id).length})
+                  </button>
+                  <button
+                    onClick={() => setDetailSubTab("commands")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition ${
+                      detailSubTab === "commands"
+                        ? "bg-indigo-600 text-white"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    <Terminal className="w-3.5 h-3.5" /> Komutlar
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setDetailProjectId(null)}
+                  className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* SUB-TAB 1: PROJECT README.md */}
+            {detailSubTab === "readme" && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="px-5 py-3 bg-zinc-900/90 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setDetailReadmeMode("preview")}
+                      className={`px-2.5 py-1 rounded-lg text-xs flex items-center gap-1 ${
+                        detailReadmeMode === "preview"
+                          ? "bg-indigo-600 text-white"
+                          : "bg-zinc-950 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      <BookOpen className="w-3.5 h-3.5" /> Görsel Okuma
+                    </button>
+                    <button
+                      onClick={() => setDetailReadmeMode("split")}
+                      className={`px-2.5 py-1 rounded-lg text-xs flex items-center gap-1 ${
+                        detailReadmeMode === "split"
+                          ? "bg-indigo-600 text-white"
+                          : "bg-zinc-950 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      <Columns className="w-3.5 h-3.5" /> Yan Yana (Split)
+                    </button>
+                    <button
+                      onClick={() => setDetailReadmeMode("edit")}
+                      className={`px-2.5 py-1 rounded-lg text-xs flex items-center gap-1 ${
+                        detailReadmeMode === "edit"
+                          ? "bg-indigo-600 text-white"
+                          : "bg-zinc-950 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      <Code2 className="w-3.5 h-3.5" /> Düzenle
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={projectMdInputRef}
+                      type="file"
+                      accept=".md,.markdown,.txt"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const text = await file.text();
+                        setDetailReadmeText(text);
+                        await apiCall("project", "update_readme", {
+                          id: detailProject.id,
+                          readme_md: text,
+                        });
+                        e.target.value = "";
+                      }}
+                    />
+                    <input
+                      ref={projectImgInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const url = await uploadImageFile(file);
+                        if (url) {
+                          const updated = `${detailReadmeText}\n![${file.name}](${url})\n`;
+                          setDetailReadmeText(updated);
+                          await apiCall("project", "update_readme", {
+                            id: detailProject.id,
+                            readme_md: updated,
+                          });
+                        }
+                        e.target.value = "";
+                      }}
+                    />
+
+                    <button
+                      onClick={() => projectMdInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200 flex items-center gap-1.5"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-indigo-400" /> Bilgisayardan .md Yükle
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        downloadMarkdownFile(`${detailProject.slug}-README.md`, detailReadmeText)
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200 flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5 text-emerald-400" /> .md İndir
+                    </button>
+
+                    <button
+                      onClick={() => projectImgInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200 flex items-center gap-1.5"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5 text-amber-400" /> Görsel Ekle
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        apiCall("project", "update_readme", {
+                          id: detailProject.id,
+                          readme_md: detailReadmeText,
+                        })
+                      }
+                      className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+                    >
+                      README Kaydet
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
+                  {(detailReadmeMode === "edit" || detailReadmeMode === "split") && (
+                    <div
+                      className={`${
+                        detailReadmeMode === "split"
+                          ? "md:col-span-6 border-r border-zinc-800"
+                          : "md:col-span-12"
+                      } flex flex-col h-full overflow-hidden`}
+                    >
+                      <textarea
+                        value={detailReadmeText}
+                        onChange={(e) => setDetailReadmeText(e.target.value)}
+                        onPaste={(e) =>
+                          handleMarkdownPaste(e, detailReadmeText, setDetailReadmeText)
+                        }
+                        placeholder="Proje README.md içeriğini buraya yaz, Ctrl+V ile ekran görüntüsü yapıştır veya üstten .md dosyası seç..."
+                        className="flex-1 w-full p-5 bg-zinc-950 text-zinc-200 font-mono text-sm leading-relaxed focus:outline-none resize-none"
+                      />
+                    </div>
+                  )}
+
+                  {(detailReadmeMode === "preview" || detailReadmeMode === "split") && (
+                    <div
+                      className={`${
+                        detailReadmeMode === "split" ? "md:col-span-6" : "md:col-span-12"
+                      } flex-1 p-6 overflow-y-auto bg-zinc-950/40`}
+                    >
+                      <MarkdownViewer
+                        content={detailReadmeText}
+                        onImageClick={(url) => setLightboxUrl(url)}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* SUB-TAB 2: PROJECT IMAGE & ARCHITECTURE GALLERY */}
+            {detailSubTab === "gallery" && (
+              <div className="flex-1 p-6 overflow-y-auto space-y-6">
+                <div className="p-4 rounded-2xl bg-zinc-950/90 border border-zinc-800 flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex-1 min-w-[220px]">
+                    <h3 className="text-sm font-semibold text-white">
+                      Proje Ekran Görüntüsü / Mimari Diyagram Yükle
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Yüklenen görseller <code className="text-indigo-300">/app/data/uploads</code>{" "}
+                      altında kalıcı olarak saklanır.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={galleryImageTitle}
+                      onChange={(e) => setGalleryImageTitle(e.target.value)}
+                      placeholder="Görsel başlığı (Örn: Veritabanı Şeması)..."
+                      className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white w-64"
+                    />
+                    <input
+                      ref={galleryImgInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const url = await uploadImageFile(file);
+                        if (url) {
+                          await apiCall("project_image", "create", {
+                            project_id: detailProject.id,
+                            title: galleryImageTitle || file.name,
+                            image_url: url,
+                          });
+                          setGalleryImageTitle("");
+                        }
+                        e.target.value = "";
+                      }}
+                    />
+                    <button
+                      disabled={uploadingImage}
+                      onClick={() => galleryImgInputRef.current?.click()}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center gap-1.5"
+                    >
+                      <Upload className="w-4 h-4" />
+                      {uploadingImage ? "Yükleniyor..." : "Bilgisayardan Görsel Seç"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {projectImages
+                    .filter((img) => img.project_id === detailProject.id)
+                    .map((img) => {
+                      const isCover = detailProject.cover_image === img.image_url;
+                      return (
+                        <div
+                          key={img.id}
+                          className="rounded-2xl bg-zinc-950 border border-zinc-800 overflow-hidden flex flex-col justify-between group"
+                        >
+                          <div
+                            onClick={() => setLightboxUrl(img.image_url)}
+                            className="relative h-48 bg-black cursor-zoom-in overflow-hidden"
+                          >
+                            <img
+                              src={img.image_url}
+                              alt={img.title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                            />
+                            <span className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white opacity-0 group-hover:opacity-100 transition">
+                              <Maximize2 className="w-4 h-4" />
+                            </span>
+                          </div>
+
+                          <div className="p-3.5 flex items-center justify-between gap-2">
+                            <div className="truncate">
+                              <p className="text-xs font-medium text-white truncate">
+                                {img.title || "Proje Görseli"}
+                              </p>
+                              <p className="text-[10px] font-mono text-zinc-500">
+                                {img.created_at}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={() =>
+                                  apiCall("project", "update_cover", {
+                                    id: detailProject.id,
+                                    cover_image: isCover ? "" : img.image_url,
+                                  })
+                                }
+                                className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition ${
+                                  isCover
+                                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                                    : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white"
+                                }`}
+                              >
+                                {isCover ? "Kapak Görseli" : "Kapak Yap"}
+                              </button>
+                              <button
+                                onClick={() =>
+                                  apiCall("project_image", "delete", { id: img.id })
+                                }
+                                className="p-1.5 rounded-lg text-zinc-500 hover:text-rose-400"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
+            {/* SUB-TAB 3: PROJECT QUICK COMMANDS */}
+            {detailSubTab === "commands" && (
+              <div className="flex-1 p-6 overflow-y-auto space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white">
+                    {detailProject.name} — Hızlı Terminal & Docker Komutları
+                  </h3>
+                  <button
+                    onClick={() => {
+                      setCmdForm({
+                        project_id: detailProject.id,
+                        title: "",
+                        command_text: "",
+                        category: "docker",
+                      });
+                      setShowCommandModal(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Bu Projeye Komut Ekle
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {commands
+                    .filter((c) => c.project_id === detailProject.id || c.project_id === null)
+                    .map((cmd) => (
+                      <div
+                        key={cmd.id}
+                        className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-between gap-4"
+                      >
+                        <div className="space-y-1 overflow-hidden">
+                          <p className="text-xs font-semibold text-zinc-200">{cmd.title}</p>
+                          <code className="block text-xs font-mono text-emerald-400 truncate">
+                            {cmd.command_text}
+                          </code>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(cmd.command_text, `dcmd-${cmd.id}`)}
+                          className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200 flex items-center gap-1.5 shrink-0"
+                        >
+                          {copiedKey === `dcmd-${cmd.id}` ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" /> Kopyalandı
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" /> Kopyala
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* FULLSCREEN IMAGE LIGHTBOX */}
+      {lightboxUrl && (
+        <div
+          onClick={() => setLightboxUrl(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-6 cursor-zoom-out"
+        >
+          <img
+            src={lightboxUrl}
+            alt="Tam Ekran Görsel"
+            className="max-w-full max-h-full rounded-xl border border-zinc-800 shadow-2xl"
+          />
+        </div>
+      )}
 
       {/* MODAL: SECURITY & PASSWORD SETTINGS */}
       {showSecurityModal && (
@@ -1589,7 +2436,7 @@ git checkout dev`}
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1">Proje Açıklaması</label>
+                <label className="block text-zinc-400 mb-1">Kısa Açıklama</label>
                 <textarea
                   rows={2}
                   value={pForm.description}
@@ -1600,9 +2447,7 @@ git checkout dev`}
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1">
-                  Teknolojiler (Virgülle ayır)
-                </label>
+                <label className="block text-zinc-400 mb-1">Teknolojiler (Virgülle ayır)</label>
                 <input
                   value={pForm.tech_stack}
                   onChange={(e) => setPForm({ ...pForm, tech_stack: e.target.value })}
@@ -1634,9 +2479,7 @@ git checkout dev`}
                   <label className="block text-zinc-400 mb-1">Docker Konteyner Adı</label>
                   <input
                     value={pForm.docker_container}
-                    onChange={(e) =>
-                      setPForm({ ...pForm, docker_container: e.target.value })
-                    }
+                    onChange={(e) => setPForm({ ...pForm, docker_container: e.target.value })}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white"
                     placeholder="ydevhub-app"
                   />
@@ -1867,6 +2710,95 @@ git checkout dev`}
                 <button
                   type="button"
                   onClick={() => setShowConfigModal(false)}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300"
+                >
+                  İptal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium"
+                >
+                  Kaydet
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: CREATE QUICK COMMAND */}
+      {showCommandModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <h3 className="text-base font-semibold text-white">Hızlı Terminal Komutu Ekle</h3>
+              <button
+                onClick={() => setShowCommandModal(false)}
+                className="text-zinc-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCommand} className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-zinc-400 mb-1">Proje</label>
+                  <select
+                    value={cmdForm.project_id}
+                    onChange={(e) => setCmdForm({ ...cmdForm, project_id: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white"
+                  >
+                    <option value="">Genel</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-zinc-400 mb-1">Kategori</label>
+                  <select
+                    value={cmdForm.category}
+                    onChange={(e) => setCmdForm({ ...cmdForm, category: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white"
+                  >
+                    <option value="docker">Docker</option>
+                    <option value="ssh">SSH / Sunucu</option>
+                    <option value="git">Git</option>
+                    <option value="sql">SQL / Database</option>
+                    <option value="system">Linux / System</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 mb-1">Komut Başlığı *</label>
+                <input
+                  required
+                  value={cmdForm.title}
+                  onChange={(e) => setCmdForm({ ...cmdForm, title: e.target.value })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white"
+                  placeholder="Örn: Homelab Sunucuya SSH Bağlantısı"
+                />
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 mb-1">Komut Satırı *</label>
+                <input
+                  required
+                  value={cmdForm.command_text}
+                  onChange={(e) => setCmdForm({ ...cmdForm, command_text: e.target.value })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm font-mono text-emerald-300"
+                  placeholder="ssh yagyz@192.168.1.100 -p 22"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setShowCommandModal(false)}
                   className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300"
                 >
                   İptal
