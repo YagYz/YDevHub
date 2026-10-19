@@ -11,6 +11,12 @@ export async function GET(req: NextRequest) {
     const projects = db
       .prepare("SELECT * FROM projects ORDER BY pinned DESC, updated_at DESC")
       .all();
+    const projectImages = db
+      .prepare("SELECT * FROM project_images ORDER BY created_at DESC")
+      .all();
+    const commands = db
+      .prepare("SELECT * FROM commands ORDER BY created_at DESC")
+      .all();
     const tasks = db
       .prepare("SELECT * FROM tasks ORDER BY created_at DESC")
       .all();
@@ -24,9 +30,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       projects: projects.map((p: any) => ({
         ...p,
+        readme_md: p.readme_md || "",
+        cover_image: p.cover_image || "",
         tech_stack: JSON.parse(p.tech_stack || "[]"),
         pinned: Boolean(p.pinned),
       })),
+      projectImages,
+      commands,
       tasks,
       notes: notes.map((n: any) => ({
         ...n,
@@ -58,13 +68,15 @@ export async function POST(req: NextRequest) {
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-");
         const stmt = db.prepare(`
-          INSERT INTO projects (name, slug, description, status, priority, tech_stack, repo_url, live_url, local_path, server_ip, server_port, docker_container, color, pinned)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO projects (name, slug, description, readme_md, cover_image, status, priority, tech_stack, repo_url, live_url, local_path, server_ip, server_port, docker_container, color, pinned)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const info = stmt.run(
           payload.name,
           slug,
           payload.description || "",
+          payload.readme_md || "",
+          payload.cover_image || "",
           payload.status || "active",
           payload.priority || "medium",
           JSON.stringify(payload.tech_stack || []),
@@ -83,7 +95,7 @@ export async function POST(req: NextRequest) {
       if (action === "update") {
         const stmt = db.prepare(`
           UPDATE projects
-          SET name = ?, description = ?, status = ?, priority = ?, tech_stack = ?,
+          SET name = ?, description = ?, readme_md = ?, cover_image = ?, status = ?, priority = ?, tech_stack = ?,
               repo_url = ?, live_url = ?, local_path = ?, server_ip = ?, server_port = ?,
               docker_container = ?, color = ?, pinned = ?, updated_at = datetime('now')
           WHERE id = ?
@@ -91,6 +103,8 @@ export async function POST(req: NextRequest) {
         stmt.run(
           payload.name,
           payload.description || "",
+          payload.readme_md || "",
+          payload.cover_image || "",
           payload.status || "active",
           payload.priority || "medium",
           JSON.stringify(payload.tech_stack || []),
@@ -107,6 +121,20 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true });
       }
 
+      if (action === "update_readme") {
+        db.prepare(
+          "UPDATE projects SET readme_md = ?, updated_at = datetime('now') WHERE id = ?"
+        ).run(payload.readme_md || "", payload.id);
+        return NextResponse.json({ success: true });
+      }
+
+      if (action === "update_cover") {
+        db.prepare(
+          "UPDATE projects SET cover_image = ?, updated_at = datetime('now') WHERE id = ?"
+        ).run(payload.cover_image || "", payload.id);
+        return NextResponse.json({ success: true });
+      }
+
       if (action === "toggle_pin") {
         db.prepare(
           "UPDATE projects SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END, updated_at = datetime('now') WHERE id = ?"
@@ -116,6 +144,47 @@ export async function POST(req: NextRequest) {
 
       if (action === "delete") {
         db.prepare("DELETE FROM projects WHERE id = ?").run(payload.id);
+        return NextResponse.json({ success: true });
+      }
+    }
+
+    if (entity === "project_image") {
+      if (action === "create") {
+        const stmt = db.prepare(`
+          INSERT INTO project_images (project_id, title, image_url)
+          VALUES (?, ?, ?)
+        `);
+        const info = stmt.run(
+          Number(payload.project_id),
+          payload.title || "",
+          payload.image_url
+        );
+        return NextResponse.json({ id: Number(info.lastInsertRowid), success: true });
+      }
+
+      if (action === "delete") {
+        db.prepare("DELETE FROM project_images WHERE id = ?").run(payload.id);
+        return NextResponse.json({ success: true });
+      }
+    }
+
+    if (entity === "command") {
+      if (action === "create") {
+        const stmt = db.prepare(`
+          INSERT INTO commands (project_id, title, command_text, category)
+          VALUES (?, ?, ?, ?)
+        `);
+        const info = stmt.run(
+          payload.project_id ? Number(payload.project_id) : null,
+          payload.title,
+          payload.command_text,
+          payload.category || "docker"
+        );
+        return NextResponse.json({ id: Number(info.lastInsertRowid), success: true });
+      }
+
+      if (action === "delete") {
+        db.prepare("DELETE FROM commands WHERE id = ?").run(payload.id);
         return NextResponse.json({ success: true });
       }
     }
