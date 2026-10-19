@@ -63,9 +63,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Dosya bulunamadı" }, { status: 400 });
     }
 
-    if (file.size > MAX_SIZE_BYTES) {
+    const db = (await import("@/lib/db")).getDb();
+    const maxMbRow = db
+      .prepare("SELECT value FROM settings WHERE key = 'cfg_max_upload_mb'")
+      .get() as { value: string } | undefined;
+    const maxMb = Number(maxMbRow?.value || process.env.MAX_UPLOAD_MB || 8);
+    const maxBytes = maxMb * 1024 * 1024;
+
+    if (file.size > maxBytes) {
       return NextResponse.json(
-        { error: "Dosya boyutu maksimum 8 MB olabilir." },
+        { error: `Dosya boyutu maksimum ${maxMb} MB olabilir.` },
         { status: 400 }
       );
     }
