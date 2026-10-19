@@ -7,18 +7,23 @@ services:
     container_name: ydevhub-app
     restart: unless-stopped
     ports:
-      - "3080:3000"
+      - "${APP_PORT:-3080}:3000"
     environment:
       - NODE_ENV=production
       - DB_DIR=/app/data
       - DB_PATH=/app/data/ydevhub.db
+      - APP_PORT=${APP_PORT:-3080}
+      - HOST_DATA_DIR=${HOST_DATA_DIR:-/DATA/AppData/ydevhub}
+      - LOCAL_DOMAIN=${LOCAL_DOMAIN:-ydevhub.yagyz.server}
+      - SECONDARY_LOCAL_DOMAIN=${SECONDARY_LOCAL_DOMAIN:-ydevhub.local}
+      - PUBLIC_DOMAIN=${PUBLIC_DOMAIN:-}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-8}
     volumes:
-      # SQLite veritabanı ve yüklenen görseller (/app/data/uploads) bu klasörde kalıcı olarak saklanır
-      - ./data:/app/data
+      # Verilerin depolanacağı sunucu yolu (.env içindeki HOST_DATA_DIR değişkeninden okunur)
+      - ${HOST_DATA_DIR:-/DATA/AppData/ydevhub}:/app/data
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
-  # Watchtower: GitHub main dalına her merge yapıldığında oluşan yeni Docker imajını algılar ve konteyneri otomatik günceller
   watchtower:
     image: containrrr/watchtower
     container_name: ydevhub-watchtower
@@ -28,4 +33,4 @@ services:
     environment:
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_LABEL_ENABLE=true
-      - WATCHTOWER_POLL_INTERVAL=60
+      - WATCHTOWER_POLL_INTERVAL=${WATCHTOWER_POLL_INTERVAL:-60}

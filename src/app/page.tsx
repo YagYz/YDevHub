@@ -168,6 +168,24 @@ export default function YDevHubPage() {
   >({});
   const [checkingHealth, setCheckingHealth] = useState(false);
 
+  // System Config state
+  const [sysConfig, setSysConfig] = useState({
+    appPort: "3080",
+    hostDataDir: "/DATA/AppData/ydevhub",
+    containerDataDir: "/app/data",
+    dbPath: "/app/data/ydevhub.db",
+    uploadsDir: "/app/data/uploads",
+    localDomain: "ydevhub.yagyz.server",
+    secondaryLocalDomain: "ydevhub.local",
+    publicDomain: "",
+    dnsServerIp: "192.168.1.150 (AdGuard Home)",
+    maxUploadMb: 8,
+    watchtowerInterval: 60,
+    dbSizeKb: 0,
+    uploadedFilesCount: 0,
+  });
+  const [sysConfigSaved, setSysConfigSaved] = useState("");
+
   // Active note for editor
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [noteTitle, setNoteTitle] = useState("");
@@ -293,6 +311,9 @@ export default function YDevHubPage() {
       }
       const data = await res.json();
       const loadedProjects: Project[] = data.projects || [];
+      if (data.systemConfig) {
+        setSysConfig(data.systemConfig);
+      }
       setProjects(loadedProjects);
       setProjectImages(data.projectImages || []);
       setCommands(data.commands || []);
@@ -876,7 +897,7 @@ export default function YDevHubPage() {
             >
               <span className="flex items-center gap-2.5">
                 <RefreshCw className="w-4 h-4" />
-                Docker & Oto-Deploy
+                Yapılandırma & DNS
               </span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             </button>
@@ -1862,53 +1883,272 @@ export default function YDevHubPage() {
             </div>
           )}
 
-          {/* TAB 6: DOCKER & CI/CD AUTO DEPLOY GUIDE */}
+          {/* TAB 6: SYSTEM CONFIGURATION, STORAGE PATH, PORT & LOCAL/PUBLIC DNS */}
           {activeTab === "cicd" && (
-            <div className="space-y-6 max-w-4xl">
+            <div className="space-y-6 max-w-5xl">
               <div className="p-6 rounded-2xl bg-gradient-to-br from-indigo-950/50 via-zinc-900 to-zinc-900 border border-indigo-500/30 space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-300">
-                    <Sparkles className="w-6 h-6" />
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-300">
+                      <Server className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-white">
+                        Sistem Yapılandırması (Config), Depolama Yolu & Local DNS Merkezi
+                      </h2>
+                      <p className="text-xs text-zinc-300">
+                        Uygulamanın çalıştığı portu, verilerin sunucuda depolandığı klasörü,{" "}
+                        <strong className="text-indigo-300">AdGuard Home Local DNS</strong>{" "}
+                        adreslerini ve ileride bağlayacağın gerçek domain ayarlarını buradan
+                        yönetebilirsin.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-white">
-                      Homelab & Otomatik Güncelleme Mimarisi (Pentest Sertleştirmeli)
-                    </h2>
-                    <p className="text-xs text-zinc-300">
-                      PBKDF2 şifreleme, Brute-Force engelleme, Magic-Byte görsel doğrulama ve CSP
-                      güvenlik başlıkları aktif!
-                    </p>
+
+                  <div className="flex items-center gap-2 text-xs font-mono">
+                    <span className="px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 text-emerald-400">
+                      DB: {sysConfig.dbSizeKb} KB
+                    </span>
+                    <span className="px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 text-indigo-300">
+                      Görsel: {sysConfig.uploadedFilesCount} Dosya
+                    </span>
                   </div>
                 </div>
 
+                {/* Active DNS & Domain Status Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                  <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-1.5">
-                    <span className="text-xs font-mono text-indigo-400">1. Adım: dev Dalı</span>
-                    <p className="text-sm font-semibold text-white">Geliştir & Test Et</p>
+                  <div className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-1.5">
+                    <span className="text-xs font-mono text-emerald-400">
+                      1. Yerel DNS (AdGuard Home Aktif)
+                    </span>
+                    <p className="text-sm font-semibold text-white font-mono">
+                      http://{sysConfig.localDomain}:{sysConfig.appPort}
+                    </p>
                     <p className="text-xs text-zinc-400">
-                      Yeni özellikleri <code className="text-zinc-200">dev</code> dalında geliştir.
-                      GitHub Actions derleme testini otomatik yapar.
+                      Ayrıca{" "}
+                      <code className="text-zinc-200">
+                        http://{sysConfig.secondaryLocalDomain}:{sysConfig.appPort}
+                      </code>{" "}
+                      ve <code className="text-zinc-200">*.yagyz.server</code> AdGuard Home
+                      üzerinde tanımlı.
                     </p>
                   </div>
-                  <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-1.5">
-                    <span className="text-xs font-mono text-emerald-400">2. Adım: main Merge</span>
-                    <p className="text-sm font-semibold text-white">Bulutta Docker İmajı</p>
+
+                  <div className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-1.5">
+                    <span className="text-xs font-mono text-indigo-400">
+                      2. Sunucu Veri Depolama Yolu
+                    </span>
+                    <p className="text-sm font-semibold text-white font-mono truncate">
+                      {sysConfig.hostDataDir}
+                    </p>
                     <p className="text-xs text-zinc-400">
-                      <code className="text-zinc-200">main</code> dalına merge ettiğinde GitHub
-                      imajı derler ve <code className="text-zinc-200">ghcr.io</code> adresine
-                      yükler.
+                      SQLite (<code className="text-zinc-200">ydevhub.db</code>) ve tüm proje
+                      görselleri (<code className="text-zinc-200">/uploads</code>) bu dizinde
+                      saklanır.
                     </p>
                   </div>
-                  <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-1.5">
-                    <span className="text-xs font-mono text-amber-400">3. Adım: Watchtower</span>
-                    <p className="text-sm font-semibold text-white">Sıfır Dokunuşla Güncelleme</p>
+
+                  <div className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-1.5">
+                    <span className="text-xs font-mono text-amber-400">
+                      3. Gerçek Domain Uyumluluğu
+                    </span>
+                    <p className="text-sm font-semibold text-white font-mono truncate">
+                      {sysConfig.publicDomain || "Çoklu Domain Hazır (Multi-Host)"}
+                    </p>
                     <p className="text-xs text-zinc-400">
-                      Homelab sunucundaki Watchtower yeni imajı algılar, SQLite ve yüklenen
-                      görselleri (<code className="text-zinc-200">/app/data</code>) koruyarak
-                      günceller!
+                      İleride gerçek bir domain bağladığında çerezler, görseller ve API hiçbir ayar
+                      bozulmadan otomatik çalışır.
                     </p>
                   </div>
                 </div>
+              </div>
+
+              {/* Interactive Configuration Form */}
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await apiCall("system_config", "update", sysConfig);
+                  setSysConfigSaved(
+                    "Yapılandırma veritabanına kaydedildi! (.env çıktısı aşağıda güncellendi)"
+                  );
+                  setTimeout(() => setSysConfigSaved(""), 3500);
+                }}
+                className="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-5"
+              >
+                <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">
+                      Uygulama & Sunucu Yapılandırma Parametreleri (Config)
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Buradaki ayarları değiştirdiğinde hem uygulama içi limitler güncellenir hem
+                      de sunucun için hazır <code className="text-indigo-300">.env</code> dosyası
+                      üretilir.
+                    </p>
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition shadow-lg shadow-indigo-600/20"
+                  >
+                    Yapılandırmayı Kaydet
+                  </button>
+                </div>
+
+                {sysConfigSaved && (
+                  <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300">
+                    {sysConfigSaved}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <label className="block text-zinc-400 mb-1">
+                      Sunucu Veri Depolama Dizini (HOST_DATA_DIR)
+                    </label>
+                    <input
+                      value={sysConfig.hostDataDir}
+                      onChange={(e) =>
+                        setSysConfig({ ...sysConfig, hostDataDir: e.target.value })
+                      }
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white"
+                      placeholder="/DATA/AppData/ydevhub"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-400 mb-1">
+                      Çalışma Portu (APP_PORT)
+                    </label>
+                    <input
+                      value={sysConfig.appPort}
+                      onChange={(e) => setSysConfig({ ...sysConfig, appPort: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-emerald-400"
+                      placeholder="3080"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-400 mb-1">
+                      Birincil Yerel DNS Domain (LOCAL_DOMAIN)
+                    </label>
+                    <input
+                      value={sysConfig.localDomain}
+                      onChange={(e) =>
+                        setSysConfig({ ...sysConfig, localDomain: e.target.value })
+                      }
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-indigo-300"
+                      placeholder="ydevhub.yagyz.server"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-400 mb-1">
+                      İkincil Yerel DNS Domain (SECONDARY_LOCAL_DOMAIN)
+                    </label>
+                    <input
+                      value={sysConfig.secondaryLocalDomain}
+                      onChange={(e) =>
+                        setSysConfig({ ...sysConfig, secondaryLocalDomain: e.target.value })
+                      }
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-indigo-300"
+                      placeholder="ydevhub.local"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-zinc-400 mb-1">
+                      Harici Gerçek Domain (PUBLIC_DOMAIN — İleride bağlandığında)
+                    </label>
+                    <input
+                      value={sysConfig.publicDomain}
+                      onChange={(e) =>
+                        setSysConfig({ ...sysConfig, publicDomain: e.target.value })
+                      }
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-amber-300"
+                      placeholder="Örn: hub.yagyz.com (Boş bırakılabilir)"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-zinc-400 mb-1">
+                        Maks. Görsel Yükleme (MB)
+                      </label>
+                      <input
+                        type="number"
+                        value={sysConfig.maxUploadMb}
+                        onChange={(e) =>
+                          setSysConfig({
+                            ...sysConfig,
+                            maxUploadMb: Number(e.target.value) || 8,
+                          })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-zinc-400 mb-1">
+                        Watchtower Kontrol (Sn)
+                      </label>
+                      <input
+                        type="number"
+                        value={sysConfig.watchtowerInterval}
+                        onChange={(e) =>
+                          setSysConfig({
+                            ...sysConfig,
+                            watchtowerInterval: Number(e.target.value) || 60,
+                          })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </form>
+
+              {/* Generated .env Config File Preview & Copy */}
+              <div className="p-5 rounded-2xl bg-zinc-900/50 border border-zinc-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">
+                      Sunucu <code className="text-indigo-400">.env</code> Yapılandırma Dosyası
+                    </h3>
+                    <p className="text-xs text-zinc-400">
+                      Sunucuda <code className="text-zinc-300">~/YDevHub/.env</code> dosyası bu
+                      değerleri kullanarak Docker portunu ve veri dizinini otomatik bağlar.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      copyToClipboard(
+                        `APP_PORT=${sysConfig.appPort}\nHOST_DATA_DIR=${sysConfig.hostDataDir}\nLOCAL_DOMAIN=${sysConfig.localDomain}\nSECONDARY_LOCAL_DOMAIN=${sysConfig.secondaryLocalDomain}\nPUBLIC_DOMAIN=${sysConfig.publicDomain}\nMAX_UPLOAD_MB=${sysConfig.maxUploadMb}\nWATCHTOWER_POLL_INTERVAL=${sysConfig.watchtowerInterval}`,
+                        "env-file-copy"
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200 flex items-center gap-1.5"
+                  >
+                    {copiedKey === "env-file-copy" ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" /> Kopyalandı
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" /> .env İçeriğini Kopyala
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <pre className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed">
+{`APP_PORT=${sysConfig.appPort}
+HOST_DATA_DIR=${sysConfig.hostDataDir}
+LOCAL_DOMAIN=${sysConfig.localDomain}
+SECONDARY_LOCAL_DOMAIN=${sysConfig.secondaryLocalDomain}
+PUBLIC_DOMAIN=${sysConfig.publicDomain}
+MAX_UPLOAD_MB=${sysConfig.maxUploadMb}
+WATCHTOWER_POLL_INTERVAL=${sysConfig.watchtowerInterval}`}
+                </pre>
               </div>
             </div>
           )}

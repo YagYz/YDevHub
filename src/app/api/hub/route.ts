@@ -1,5 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb, SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/db";
+import {
+  getDb,
+  getDbPath,
+  getUploadsDir,
+  SESSION_COOKIE_NAME,
+  verifySessionToken,
+} from "@/lib/db";
+import fs from "fs";
+
+function getSystemConfig(db: any) {
+  const rows = db.prepare("SELECT key, value FROM settings").all() as Array<{
+    key: string;
+    value: string;
+  }>;
+  const map: Record<string, string> = {};
+  for (const r of rows) {
+    map[r.key] = r.value;
+  }
+
+  let dbSizeKb = 0;
+  try {
+    const stat = fs.statSync(getDbPath());
+    dbSizeKb = Math.round(stat.size / 1024);
+  } catch {}
+
+  let uploadedFilesCount = 0;
+  try {
+    const files = fs.readdirSync(getUploadsDir());
+    uploadedFilesCount = files.filter((f) => !f.startsWith(".")).length;
+  } catch {}
+
+  return {
+    appPort: map.cfg_app_port || process.env.APP_PORT || "3080",
+    hostDataDir:
+      map.cfg_host_data_dir || process.env.HOST_DATA_DIR || "/DATA/AppData/ydevhub",
+    containerDataDir: process.env.DB_DIR || "/app/data",
+    dbPath: getDbPath(),
+    uploadsDir: getUploadsDir(),
+    localDomain:
+      map.cfg_local_domain || process.env.LOCAL_DOMAIN || "ydevhub.yagyz.server",
+    secondaryLocalDomain:
+      map.cfg_secondary_local_domain ||
+      process.env.SECONDARY_LOCAL_DOMAIN ||
+      "ydevhub.local",
+    publicDomain: map.cfg_public_domain ?? process.env.PUBLIC_DOMAIN ?? "",
+    dnsServerIp: map.cfg_dns_server_ip || "192.168.1.150 (AdGuard Home)",
+    maxUploadMb: Number(map.cfg_max_upload_mb || process.env.MAX_UPLOAD_MB || 8),
+    watchtowerInterval: Number(
+      map.cfg_watchtower_interval || process.env.WATCHTOWER_POLL_INTERVAL || 60
+    ),
+    dbSizeKb,
+    uploadedFilesCount,
+  };
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -28,6 +81,7 @@ export async function GET(req: NextRequest) {
       .all();
 
     return NextResponse.json({
+      systemConfig: getSystemConfig(db),
       projects: projects.map((p: any) => ({
         ...p,
         readme_md: p.readme_md || "",
@@ -61,6 +115,39 @@ export async function POST(req: NextRequest) {
     const db = getDb();
     const body = await req.json();
     const { entity, action, payload } = body;
+
+    if (entity === "system_config" && action === "update") {
+      const upsert = db.prepare(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
+      );
+      if (payload.appPort !== undefined)
+        upsert.run("cfg_app_port", String(payload.appPort).trim());
+      if (payload.hostDataDir !== undefined)
+        upsert.run("cfg_host_data_dir", String(payload.hostDataDir).trim());
+      if (payload.localDomain !== undefined)
+        upsert.run("cfg_local_domain", String(payload.localDomain).trim());
+      if (payload.secondaryLocalDomain !== undefined)
+        upsert.run(
+          "cfg_secondary_local_domain",
+          String(payload.secondaryLocalDomain).trim()
+        );
+      if (payload.publicDomain !== undefined)
+        upsert.run("cfg_public_domain", String(payload.publicDomain).trim());
+      if (payload.dnsServerIp !== undefined)
+        upsert.run("cfg_dns_server_ip", String(payload.dnsServerIp).trim());
+      if (payload.maxUploadMb !== undefined)
+        upsert.run("cfg_max_upload_mb", String(Number(payload.maxUploadMb) || 8));
+      if (payload.watchtowerInterval !== undefined)
+        upsert.run(
+          "cfg_watchtower_interval",
+          String(Number(payload.watchtowerInterval) || 60)
+        );
+
+      return NextResponse.json({
+        success: true,
+        systemConfig: getSystemConfig(db),
+      });
+    }
 
     if (entity === "project") {
       if (action === "create") {

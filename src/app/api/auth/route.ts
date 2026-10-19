@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
       const res = NextResponse.json({ success: true, authenticated: true });
       res.cookies.set(SESSION_COOKIE_NAME, token, {
         httpOnly: true,
-        sameSite: "strict",
+        sameSite: "lax",
         path: "/",
         maxAge: 60 * 60 * 24 * 30,
       });
