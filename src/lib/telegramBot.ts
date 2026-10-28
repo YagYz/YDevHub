@@ -110,37 +110,93 @@ export function resolveDateString(str: string, now: Date = new Date()): { iso: s
   return null;
 }
 
-export function parseDateAndContent(raw: string): { targetDate: string; content: string; dateLabel: string } {
+export function resolveTimeString(str: string): string | null {
+  const clean = str.replace(/[\[\]]/g, "").trim();
+  const timeMatch = clean.match(/^([0-1]?[0-9]|2[0-3])[:.]([0-5][0-9])$/);
+  if (timeMatch) {
+    const h = String(timeMatch[1]).padStart(2, "0");
+    const m = String(timeMatch[2]).padStart(2, "0");
+    return `${h}:${m}`;
+  }
+  return null;
+}
+
+export function parseDateAndContent(raw: string): {
+  targetDate: string;
+  targetTime: string;
+  content: string;
+  dateLabel: string;
+} {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const formatDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-  const text = raw.trim();
-  const todayIso = formatDate(now);
+  let text = raw.trim();
+  let targetDate = formatDate(now);
+  let targetTime = "";
+  let dateLabel = "Bugün";
 
-  // 1) [tarih] içerik
+  // 1) Köşeli parantez: [yarin 14:30] veya [14:30] veya [30.10]
   const bracketMatch = text.match(/^\[(.*?)\]\s*(.*)$/s);
   if (bracketMatch) {
     const tag = bracketMatch[1].trim();
     const rest = bracketMatch[2].trim();
-    const parsed = resolveDateString(tag, now);
-    if (parsed) {
-      return { targetDate: parsed.iso, content: rest, dateLabel: parsed.label };
+    const tagParts = tag.split(/\s+/);
+
+    for (const part of tagParts) {
+      const d = resolveDateString(part, now);
+      if (d) {
+        targetDate = d.iso;
+        dateLabel = d.label;
+        continue;
+      }
+      const t = resolveTimeString(part);
+      if (t) {
+        targetTime = t;
+        continue;
+      }
+    }
+    text = rest;
+  }
+
+  // 2) Başlangıçtaki kelimeleri tara (tarih ve/veya saat)
+  // Örn: "yarin 15:00 toplantı" veya "15:00 toplantı" veya "30.10 14:00 bakım"
+  let words = text.split(/\s+/);
+  let changed = true;
+
+  while (changed && words.length > 1) {
+    changed = false;
+    const w = words[0];
+    const d = resolveDateString(w, now);
+    if (d) {
+      targetDate = d.iso;
+      dateLabel = d.label;
+      words.shift();
+      changed = true;
+      continue;
+    }
+    const t = resolveTimeString(w);
+    if (t) {
+      targetTime = t;
+      words.shift();
+      changed = true;
+      continue;
     }
   }
 
-  // 2) İlk kelime tarih ise: "yarin toplantı" veya "30.10 sunucu kontrol"
-  const firstWordMatch = text.match(/^(\S+)\s+(.+)$/s);
-  if (firstWordMatch) {
-    const firstWord = firstWordMatch[1].trim();
-    const rest = firstWordMatch[2].trim();
-    const parsed = resolveDateString(firstWord, now);
-    if (parsed) {
-      return { targetDate: parsed.iso, content: rest, dateLabel: parsed.label };
+  text = words.join(" ").trim();
+
+  // 3) İçerik sonundaki veya ortasındaki "saat 15:30" veya "15:30" kalıbını da yakala
+  if (!targetTime) {
+    const inlineTime = text.match(/\b(?:saat\s+)?([0-1]?[0-9]|2[0-3])[:.]([0-5][0-9])\b/i);
+    if (inlineTime) {
+      const h = String(inlineTime[1]).padStart(2, "0");
+      const m = String(inlineTime[2]).padStart(2, "0");
+      targetTime = `${h}:${m}`;
     }
   }
 
-  return { targetDate: todayIso, content: text, dateLabel: `Bugün (${todayIso})` };
+  return { targetDate, targetTime, content: text, dateLabel };
 }
 
 export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["message"]>) {
@@ -184,16 +240,18 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   // Komutlar
   if (text === "/start" || text === "/yardim" || text === "/help") {
     const helpMsg = `⚡ <b>YDevHub Asistan Komutları</b>\n
+📋 <b>Görev Yönetimi & 1 Saat Kala Hatırlatma:</b>
+• <code>/gorev [başlık]</code> - Bugün için genel görev ekler
+• <code>/gorev 15:30 [başlık]</code> - Bugün saat 15:30 için görev <i>(14:30'da otomatik hatırlatır!)</i>
+• <code>/gorev yarin 14:00 [başlık]</code> - Yarın saat 14:00 için görev
+• <code>/gorev 30.10 11:00 [başlık]</code> - Belirli gün ve saat
+• <code>/tamam [ID]</code> veya <code>/tamamla [ID]</code> - Görevi tamamlandı yapar!
+
 📝 <b>Not Alma & Tarih Seçimi:</b>
 • <i>Düz metin:</i> Doğrudan bugünün notlarına ekler.
 • <code>/not [not]</code> - Bugünün notlarına ekler
 • <code>/not yarin [not]</code> veya <code>/not [yarin] [not]</code> - Yarının notlarına ekler
-• <code>/not YYYY-AA-GG [not]</code> - Belirli tarihe ekler (Örn: <code>/not 2026-10-31 Fatura</code>)
-• <code>/not GG.AA [not]</code> - Gün.Ay olarak ekler (Örn: <code>/not 30.10 Sunucu</code>)
-
-📋 <b>Görev Yönetimi:</b>
-• <code>/gorev [başlık]</code> veya <code>/gorev yarin [başlık]</code> - Hızlı görev ekler
-• <code>/tamam [ID]</code> veya <code>/tamamla [ID]</code> - Görevi (veya notu) tamamlandı yapar!
+• <code>/not YYYY-AA-GG [not]</code> veya <code>/not GG.AA [not]</code> - Belirli güne ekler
 
 📊 <b>Sistem & Süreç Kontrolü:</b>
 • <code>/durum</code> veya <code>/ps</code> - Aktif Docker ve sunucu süreçlerini listeler
@@ -325,25 +383,29 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   if (text.startsWith("/gorev ") || text.startsWith("/task ")) {
     const rawTask = text.replace(/^\/(gorev|task)\s+/, "").trim();
     if (!rawTask) {
-      await sendTelegramMessage(senderChatId, "⚠️ Lütfen görev başlığı yazınız: <code>/gorev [tarih] Başlık</code>");
+      await sendTelegramMessage(
+        senderChatId,
+        "⚠️ Lütfen görev başlığı yazınız: <code>/gorev [tarih] [saat] Başlık</code>\nÖrnek: <code>/gorev 15:30 Sunucu bakımı</code>"
+      );
       return;
     }
 
-    const { targetDate, content, dateLabel } = parseDateAndContent(rawTask);
+    const { targetDate, targetTime, content, dateLabel } = parseDateAndContent(rawTask);
     if (!content) {
       await sendTelegramMessage(senderChatId, "⚠️ Lütfen görev başlığı yazınız.");
       return;
     }
 
     const info = db.prepare(
-      "INSERT INTO tasks (title, description, status, priority, tag, due_date) VALUES (?, '', 'todo', 'medium', 'telegram', ?)"
-    ).run(content, targetDate);
+      "INSERT INTO tasks (title, description, status, priority, tag, due_date, due_time, reminder_sent) VALUES (?, '', 'todo', 'medium', 'telegram', ?, ?, 0)"
+    ).run(content, targetDate, targetTime || null);
 
     const newTaskId = Number(info.lastInsertRowid);
+    const timeDisplay = targetTime ? ` ⏰ <b>${targetTime}</b> <i>(1 saat önce hatırlatılır)</i>` : "";
 
     await sendTelegramMessage(
       senderChatId,
-      `✅ <b>Görev Eklendi!</b>\n📌 <b>[#${newTaskId}]</b> ${escapeHtml(content)}\n📅 <b>Tarih:</b> ${dateLabel}\n\n💡 <i>Tamamlamak için:</i> <code>/tamam ${newTaskId}</code>`
+      `✅ <b>Görev Eklendi!</b>\n📌 <b>[#${newTaskId}]</b> ${escapeHtml(content)}\n📅 <b>Tarih/Saat:</b> ${dateLabel}${timeDisplay}\n\n💡 <i>Tamamlamak için:</i> <code>/tamam ${newTaskId}</code>`
     );
     return;
   }
@@ -352,7 +414,7 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   if (text === "/not" || text === "/n") {
     await sendTelegramMessage(
       senderChatId,
-      `⚠️ <b>Not Ekleme Formatı:</b>\n• <code>/not [içerik]</code> (Bugün)\n• <code>/not yarin [içerik]</code> (Yarın)\n• <code>/not 2026-10-31 [içerik]</code> (Tarih)\n• <code>/not 30.10 [içerik]</code> (Gün.Ay)`
+      `⚠️ <b>Not Ekleme Formatı:</b>\n• <code>/not [içerik]</code> (Bugün)\n• <code>/not yarin [içerik]</code> (Yarın)\n• <code>/not 2026-10-31 [içerik]</code> (Tarih)\n• <code>/not 30.10 14:00 [içerik]</code> (Tarih + Saat)`
     );
     return;
   }
@@ -364,7 +426,7 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   }
 
   if (noteRaw) {
-    const { targetDate, content, dateLabel } = parseDateAndContent(noteRaw);
+    const { targetDate, targetTime, content, dateLabel } = parseDateAndContent(noteRaw);
 
     if (!content) {
       await sendTelegramMessage(senderChatId, "⚠️ Lütfen kaydedilecek not içeriğini yazınız.");
@@ -376,10 +438,11 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     ).run(content, targetDate);
 
     const noteId = Number(info.lastInsertRowid);
+    const timeDisplay = targetTime ? ` ⏰ ${targetTime}` : "";
 
     await sendTelegramMessage(
       senderChatId,
-      `📝 <b>Gündelik Nota Kaydedildi (${dateLabel}):</b>\n<b>[#${noteId}]</b> "<i>${escapeHtml(content)}</i>"\n\n💡 <i>Tamamlamak için:</i> <code>/tamam ${noteId}</code>`
+      `📝 <b>Gündelik Nota Kaydedildi (${dateLabel}${timeDisplay}):</b>\n<b>[#${noteId}]</b> "<i>${escapeHtml(content)}</i>"\n\n💡 <i>Tamamlamak için:</i> <code>/tamam ${noteId}</code>`
     );
     return;
   }
