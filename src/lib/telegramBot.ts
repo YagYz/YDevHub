@@ -68,6 +68,81 @@ export async function sendTelegramMessage(
   }
 }
 
+export function resolveDateString(str: string, now: Date = new Date()): { iso: string; label: string } | null {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const formatDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  const clean = str.replace(/[\[\]]/g, "").trim().toLowerCase();
+
+  if (clean === "bugun" || clean === "bugün" || clean === "today") {
+    return { iso: formatDate(now), label: "Bugün" };
+  }
+  if (clean === "yarin" || clean === "yarın" || clean === "tomorrow") {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return { iso: formatDate(tomorrow), label: `Yarın (${formatDate(tomorrow)})` };
+  }
+  if (clean === "dun" || clean === "dün" || clean === "yesterday") {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return { iso: formatDate(yesterday), label: `Dün (${formatDate(yesterday)})` };
+  }
+
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    return { iso: clean, label: clean };
+  }
+
+  // DD.MM.YYYY
+  const ddmmyyyy = clean.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (ddmmyyyy) {
+    const iso = `${ddmmyyyy[3]}-${pad(Number(ddmmyyyy[2]))}-${pad(Number(ddmmyyyy[1]))}`;
+    return { iso, label: iso };
+  }
+
+  // DD.MM (bu yıl)
+  const ddmm = clean.match(/^(\d{1,2})\.(\d{1,2})$/);
+  if (ddmm) {
+    const iso = `${now.getFullYear()}-${pad(Number(ddmm[2]))}-${pad(Number(ddmm[1]))}`;
+    return { iso, label: iso };
+  }
+
+  return null;
+}
+
+export function parseDateAndContent(raw: string): { targetDate: string; content: string; dateLabel: string } {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const formatDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  const text = raw.trim();
+  const todayIso = formatDate(now);
+
+  // 1) [tarih] içerik
+  const bracketMatch = text.match(/^\[(.*?)\]\s*(.*)$/s);
+  if (bracketMatch) {
+    const tag = bracketMatch[1].trim();
+    const rest = bracketMatch[2].trim();
+    const parsed = resolveDateString(tag, now);
+    if (parsed) {
+      return { targetDate: parsed.iso, content: rest, dateLabel: parsed.label };
+    }
+  }
+
+  // 2) İlk kelime tarih ise: "yarin toplantı" veya "30.10 sunucu kontrol"
+  const firstWordMatch = text.match(/^(\S+)\s+(.+)$/s);
+  if (firstWordMatch) {
+    const firstWord = firstWordMatch[1].trim();
+    const rest = firstWordMatch[2].trim();
+    const parsed = resolveDateString(firstWord, now);
+    if (parsed) {
+      return { targetDate: parsed.iso, content: rest, dateLabel: parsed.label };
+    }
+  }
+
+  return { targetDate: todayIso, content: text, dateLabel: `Bugün (${todayIso})` };
+}
+
 export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["message"]>) {
   const text = (msg.text || "").trim();
   const senderChatId = String(msg.chat.id);
@@ -109,20 +184,71 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   // Komutlar
   if (text === "/start" || text === "/yardim" || text === "/help") {
     const helpMsg = `⚡ <b>YDevHub Asistan Komutları</b>\n
-📝 <b>Not Alma:</b>
-• <i>Herhangi bir metin</i> yazıp gönderirseniz doğrudan bugünün gündelik notlarına eklenir.
-• Veya: <code>/not [not içeriği]</code>
+📝 <b>Not Alma & Tarih Seçimi:</b>
+• <i>Düz metin:</i> Doğrudan bugünün notlarına ekler.
+• <code>/not [not]</code> - Bugünün notlarına ekler
+• <code>/not yarin [not]</code> veya <code>/not [yarin] [not]</code> - Yarının notlarına ekler
+• <code>/not YYYY-AA-GG [not]</code> - Belirli tarihe ekler (Örn: <code>/not 2026-10-31 Fatura</code>)
+• <code>/not GG.AA [not]</code> - Gün.Ay olarak ekler (Örn: <code>/not 30.10 Sunucu</code>)
 
-📋 <b>Görev Ekleme:</b>
-• <code>/gorev [başlık]</code> - Hızlı görev ekler
+📋 <b>Görev Yönetimi:</b>
+• <code>/gorev [başlık]</code> veya <code>/gorev yarin [başlık]</code> - Hızlı görev ekler
+• <code>/tamam [ID]</code> veya <code>/tamamla [ID]</code> - Görevi (veya notu) tamamlandı yapar!
 
 📊 <b>Sistem & Süreç Kontrolü:</b>
 • <code>/durum</code> veya <code>/ps</code> - Aktif Docker ve sunucu süreçlerini listeler
-• <code>/bugun</code> - Bugünün notlarını ve bekleyen işleri döker
+• <code>/bugun</code> - Bugünün notlarını ve görevlerini (ID numaralarıyla) döker
 
 ⚙️ <b>Yönetim:</b>
 • <code>/yardim</code> - Bu yardım mesajını gösterir`;
     await sendTelegramMessage(senderChatId, helpMsg);
+    return;
+  }
+
+  // /tamam [id] veya /tamamla [id] veya /done [id]
+  if (text.startsWith("/tamam") || text.startsWith("/done") || text.startsWith("/bitir")) {
+    const rawId = text.replace(/^\/(tamamla|tamam|done|bitir)\s*/i, "").replace(/^#/, "").trim();
+    const targetId = parseInt(rawId, 10);
+    if (isNaN(targetId) || targetId <= 0) {
+      await sendTelegramMessage(
+        senderChatId,
+        "⚠️ Lütfen tamamlanacak görev veya not ID'sini belirtin.\nÖrnek: <code>/tamam 5</code>"
+      );
+      return;
+    }
+
+    // 1) Görevlerde ara
+    const task = db
+      .prepare("SELECT id, title, status FROM tasks WHERE id = ?")
+      .get(targetId) as { id: number; title: string; status: string } | undefined;
+
+    if (task) {
+      db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(targetId);
+      await sendTelegramMessage(
+        senderChatId,
+        `✅ <b>Görev Tamamlandı!</b>\n📌 <b>[#${task.id}]</b> <s>${escapeHtml(task.title)}</s>`
+      );
+      return;
+    }
+
+    // 2) Gündelik notlarda ara
+    const dailyNote = db
+      .prepare("SELECT id, content, is_done, date FROM daily_notes WHERE id = ?")
+      .get(targetId) as { id: number; content: string; is_done: number; date: string } | undefined;
+
+    if (dailyNote) {
+      db.prepare("UPDATE daily_notes SET is_done = 1 WHERE id = ?").run(targetId);
+      await sendTelegramMessage(
+        senderChatId,
+        `✅ <b>Gündelik Not Tamamlandı!</b>\n📝 <b>[#${dailyNote.id}]</b> <s>${escapeHtml(dailyNote.content)}</s> (${dailyNote.date})`
+      );
+      return;
+    }
+
+    await sendTelegramMessage(
+      senderChatId,
+      `❌ <b>Bulunamadı:</b> #${targetId} numaralı açık görev veya not bulunamadı.`
+    );
     return;
   }
 
@@ -164,7 +290,7 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
 
     const pendingTasks = db
       .prepare(
-        "SELECT * FROM tasks WHERE status != 'done' AND (due_date = ? OR due_date = '' OR due_date IS NULL) ORDER BY priority DESC LIMIT 10"
+        "SELECT * FROM tasks WHERE status != 'done' AND (due_date = ? OR due_date = '' OR due_date IS NULL) ORDER BY priority DESC LIMIT 15"
       )
       .all(today) as any[];
 
@@ -176,7 +302,7 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
       for (const n of dailyNotes) {
         const check = n.is_done ? "✅ <s>" : "▫️ ";
         const end = n.is_done ? "</s>" : "";
-        rep += `${check}${escapeHtml(n.content)}${end}\n`;
+        rep += `${check}<b>[#${n.id}]</b> ${escapeHtml(n.content)}${end}\n`;
       }
     }
 
@@ -186,8 +312,9 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     } else {
       for (const t of pendingTasks) {
         const timeStr = t.due_time ? ` [⏰ ${t.due_time}]` : "";
-        rep += `• <b>${escapeHtml(t.title)}</b>${timeStr} (${t.priority})\n`;
+        rep += `• <b>[#${t.id}]</b> <b>${escapeHtml(t.title)}</b>${timeStr} (${t.priority})\n`;
       }
+      rep += `\n💡 <i>Görevi tamamlamak için:</i> <code>/tamam &lt;ID&gt;</code>\n`;
     }
 
     await sendTelegramMessage(senderChatId, rep);
@@ -196,35 +323,65 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
 
   // /gorev [başlık]
   if (text.startsWith("/gorev ") || text.startsWith("/task ")) {
-    const taskTitle = text.replace(/^\/(gorev|task)\s+/, "").trim();
-    if (!taskTitle) {
-      await sendTelegramMessage(senderChatId, "⚠️ Lütfen görev başlığı yazınız: <code>/gorev Başlık</code>");
+    const rawTask = text.replace(/^\/(gorev|task)\s+/, "").trim();
+    if (!rawTask) {
+      await sendTelegramMessage(senderChatId, "⚠️ Lütfen görev başlığı yazınız: <code>/gorev [tarih] Başlık</code>");
       return;
     }
 
-    db.prepare(
+    const { targetDate, content, dateLabel } = parseDateAndContent(rawTask);
+    if (!content) {
+      await sendTelegramMessage(senderChatId, "⚠️ Lütfen görev başlığı yazınız.");
+      return;
+    }
+
+    const info = db.prepare(
       "INSERT INTO tasks (title, description, status, priority, tag, due_date) VALUES (?, '', 'todo', 'medium', 'telegram', ?)"
-    ).run(taskTitle, today);
+    ).run(content, targetDate);
 
-    await sendTelegramMessage(senderChatId, `✅ <b>Görev eklendi:</b> ${escapeHtml(taskTitle)}`);
-    return;
-  }
-
-  // /not [içerik] veya doğrudan metin gönderme
-  let noteContent = text;
-  if (text.startsWith("/not ") || text.startsWith("/n ")) {
-    noteContent = text.replace(/^\/(not|n)\s+/, "").trim();
-  }
-
-  if (noteContent) {
-    db.prepare(
-      "INSERT INTO daily_notes (content, date, is_done, priority, source) VALUES (?, ?, 0, 'medium', 'telegram')"
-    ).run(noteContent, today);
+    const newTaskId = Number(info.lastInsertRowid);
 
     await sendTelegramMessage(
       senderChatId,
-      `📝 <b>Gündelik nota kaydedildi:</b>\n"<i>${escapeHtml(noteContent)}</i>"`
+      `✅ <b>Görev Eklendi!</b>\n📌 <b>[#${newTaskId}]</b> ${escapeHtml(content)}\n📅 <b>Tarih:</b> ${dateLabel}\n\n💡 <i>Tamamlamak için:</i> <code>/tamam ${newTaskId}</code>`
     );
+    return;
+  }
+
+  // /not veya /n tek başına gönderilirse format yardımı
+  if (text === "/not" || text === "/n") {
+    await sendTelegramMessage(
+      senderChatId,
+      `⚠️ <b>Not Ekleme Formatı:</b>\n• <code>/not [içerik]</code> (Bugün)\n• <code>/not yarin [içerik]</code> (Yarın)\n• <code>/not 2026-10-31 [içerik]</code> (Tarih)\n• <code>/not 30.10 [içerik]</code> (Gün.Ay)`
+    );
+    return;
+  }
+
+  // /not [içerik] veya doğrudan düz metin gönderme
+  let noteRaw = text;
+  if (text.startsWith("/not ") || text.startsWith("/n ")) {
+    noteRaw = text.replace(/^\/(not|n)\s+/, "").trim();
+  }
+
+  if (noteRaw) {
+    const { targetDate, content, dateLabel } = parseDateAndContent(noteRaw);
+
+    if (!content) {
+      await sendTelegramMessage(senderChatId, "⚠️ Lütfen kaydedilecek not içeriğini yazınız.");
+      return;
+    }
+
+    const info = db.prepare(
+      "INSERT INTO daily_notes (content, date, is_done, priority, source) VALUES (?, ?, 0, 'medium', 'telegram')"
+    ).run(content, targetDate);
+
+    const noteId = Number(info.lastInsertRowid);
+
+    await sendTelegramMessage(
+      senderChatId,
+      `📝 <b>Gündelik Nota Kaydedildi (${dateLabel}):</b>\n<b>[#${noteId}]</b> "<i>${escapeHtml(content)}</i>"\n\n💡 <i>Tamamlamak için:</i> <code>/tamam ${noteId}</code>`
+    );
+    return;
   }
 }
 

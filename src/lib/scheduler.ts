@@ -53,7 +53,7 @@ export async function checkMorningSummary(now: Date = new Date()): Promise<void>
     if (overdueTasks.length > 0) {
       msg += `🚨 <b>Gecikmiş Görevler (${overdueTasks.length}):</b>\n`;
       for (const t of overdueTasks) {
-        msg += `• <b>${escapeHtml(t.title)}</b> (Tarih: ${t.due_date})\n`;
+        msg += `• <b>[#${t.id}] ${escapeHtml(t.title)}</b> (Tarih: ${t.due_date}) → <code>/tamam ${t.id}</code>\n`;
       }
       msg += `\n`;
     }
@@ -64,7 +64,7 @@ export async function checkMorningSummary(now: Date = new Date()): Promise<void>
     } else {
       for (const t of todayTasks) {
         const timePart = t.due_time ? ` [⏰ <b>${t.due_time}</b>]` : "";
-        msg += `• <b>${escapeHtml(t.title)}</b>${timePart} (${t.priority})\n`;
+        msg += `• <b>[#${t.id}] ${escapeHtml(t.title)}</b>${timePart} (${t.priority}) → <code>/tamam ${t.id}</code>\n`;
       }
     }
 
@@ -75,7 +75,7 @@ export async function checkMorningSummary(now: Date = new Date()): Promise<void>
       for (const n of dailyNotes) {
         const icon = n.is_done ? "✅ <s>" : "▫️ ";
         const end = n.is_done ? "</s>" : "";
-        msg += `${icon}${escapeHtml(n.content)}${end}\n`;
+        msg += `${icon}[#${n.id}] ${escapeHtml(n.content)}${end}\n`;
       }
     }
 
@@ -115,12 +115,14 @@ export async function checkTaskReminders(now: Date = new Date()): Promise<void> 
       // 0 ile 60 dakika (1 saat) kala hatırlatma gönder
       if (diffMinutes > 0 && diffMinutes <= 60) {
         let reminderMsg = `⏰ <b>Görev Hatırlatması (1 Saat Kaldı)</b>\n\n`;
+        reminderMsg += `🆔 <b>Görev ID:</b> <code>#${t.id}</code>\n`;
         reminderMsg += `📌 <b>Görev:</b> ${escapeHtml(t.title)}\n`;
         reminderMsg += `🕒 <b>Kalan Süre:</b> Yaklaşık ~${diffMinutes} dakika (Saat: <b>${t.due_time}</b>)\n`;
         reminderMsg += `🏷️ <b>Öncelik:</b> ${t.priority}\n`;
         if (t.description) {
           reminderMsg += `📝 <b>Açıklama:</b> ${escapeHtml(t.description)}\n`;
         }
+        reminderMsg += `\n✅ <i>Tamamlamak için:</i> <code>/tamam ${t.id}</code>`;
 
         const sent = await sendTelegramMessage(chatId, reminderMsg);
         if (sent) {
