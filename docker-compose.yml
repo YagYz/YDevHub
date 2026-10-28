@@ -18,9 +18,13 @@ services:
       - SECONDARY_LOCAL_DOMAIN=${SECONDARY_LOCAL_DOMAIN:-ydevhub.local}
       - PUBLIC_DOMAIN=${PUBLIC_DOMAIN:-}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-8}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
     volumes:
       # Verilerin depolanacağı sunucu yolu (.env içindeki HOST_DATA_DIR değişkeninden okunur)
       - ${HOST_DATA_DIR:-/DATA/AppData/ydevhub}:/app/data
+      # Docker süreçlerini ve konteyner sağlığını izlemek için salt-okunur soket
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
