@@ -181,11 +181,25 @@ function initSchema(db: DatabaseSync) {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS daily_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT NOT NULL,
+      date TEXT NOT NULL,
+      is_done INTEGER DEFAULT 0,
+      priority TEXT DEFAULT 'medium',
+      source TEXT DEFAULT 'web',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Safe migration for existing databases
   ensureColumn(db, "projects", "readme_md", "TEXT DEFAULT ''");
   ensureColumn(db, "projects", "cover_image", "TEXT DEFAULT ''");
+  ensureColumn(db, "tasks", "due_time", "TEXT DEFAULT ''");
+  ensureColumn(db, "tasks", "reminder_sent", "INTEGER DEFAULT 0");
+  ensureColumn(db, "daily_notes", "source", "TEXT DEFAULT 'web'");
 
   // Initialize default admin password if not set
   const existingPass = db
@@ -199,6 +213,17 @@ function initSchema(db: DatabaseSync) {
     );
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('auth_enabled', '1')").run();
   }
+
+  // Initialize default Telegram and automation settings
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('telegram_bot_token', ?)").run(
+    process.env.TELEGRAM_BOT_TOKEN || ""
+  );
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('telegram_chat_id', ?)").run(
+    process.env.TELEGRAM_CHAT_ID || ""
+  );
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('telegram_bot_enabled', '1')").run();
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('morning_summary_time', '08:30')").run();
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('morning_summary_last_date', '')").run();
 
   // Seed default commands if commands table is empty
   const cmdCount = db.prepare("SELECT COUNT(*) as c FROM commands").get() as { c: number };
@@ -261,3 +286,42 @@ Bu ekran üzerinden projeye ait **README.md** dosyasını görsel olarak okuyabi
     );
   }
 }
+
+export function getSetting(key: string, defaultValue = ""): string {
+  try {
+    const db = getDb();
+    const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+      | { value: string }
+      | undefined;
+    return row ? row.value : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+}
+
+export function setSetting(key: string, value: string): void {
+  const db = getDb();
+  db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?").run(
+    key,
+    value,
+    value
+  );
+}
+
+export function getAllSettings(): Record<string, string> {
+  try {
+    const db = getDb();
+    const rows = db.prepare("SELECT key, value FROM settings").all() as Array<{
+      key: string;
+      value: string;
+    }>;
+    const res: Record<string, string> = {};
+    for (const r of rows) {
+      res[r.key] = r.value;
+    }
+    return res;
+  } catch {
+    return {};
+  }
+}
+

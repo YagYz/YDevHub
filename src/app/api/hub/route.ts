@@ -279,8 +279,8 @@ export async function POST(req: NextRequest) {
     if (entity === "task") {
       if (action === "create") {
         const stmt = db.prepare(`
-          INSERT INTO tasks (project_id, title, description, status, priority, tag, due_date)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO tasks (project_id, title, description, status, priority, tag, due_date, due_time)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const info = stmt.run(
           payload.project_id || null,
@@ -289,7 +289,8 @@ export async function POST(req: NextRequest) {
           payload.status || "todo",
           payload.priority || "medium",
           payload.tag || "feature",
-          payload.due_date || ""
+          payload.due_date || "",
+          payload.due_time || ""
         );
         return NextResponse.json({ id: Number(info.lastInsertRowid), success: true });
       }
