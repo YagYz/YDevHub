@@ -199,6 +199,88 @@ export function parseDateAndContent(raw: string): {
   return { targetDate, targetTime, content: text, dateLabel };
 }
 
+export function parseTargetIdentifier(raw: string): { type: "task" | "note" | "auto"; id: number } | null {
+  const clean = raw.trim().toLowerCase();
+
+  // "n2", "n-2", "not 2", "not-2"
+  const notPrefix = clean.match(/^(?:not|n)[-_\s]?(\d+)$/i);
+  if (notPrefix) {
+    return { type: "note", id: parseInt(notPrefix[1], 10) };
+  }
+
+  // "g2", "g-2", "gorev 2", "task 2", "t2"
+  const taskPrefix = clean.match(/^(?:gorev|task|g|t)[-_\s]?(\d+)$/i);
+  if (taskPrefix) {
+    return { type: "task", id: parseInt(taskPrefix[1], 10) };
+  }
+
+  // Pure number "2", "#2"
+  const pureNum = clean.match(/^#?(\d+)$/);
+  if (pureNum) {
+    return { type: "auto", id: parseInt(pureNum[1], 10) };
+  }
+
+  return null;
+}
+
+export function computePostponedTimeAndDate(
+  currentDate: string,
+  currentTime: string,
+  argsStr: string
+): { newDate: string; newTime: string; label: string } {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const formatDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  let targetDate = currentDate || formatDate(now);
+  let targetTime = currentTime || "";
+  const raw = argsStr.trim().toLowerCase();
+
+  // Boş veya "+1" / "1 saat" / "1s" / "60"
+  if (!raw || raw === "1 saat" || raw === "1s" || raw === "+1" || raw === "60" || raw === "+1h") {
+    let baseHour = now.getHours();
+    let baseMin = now.getMinutes();
+    if (targetTime) {
+      const parts = targetTime.split(":").map(Number);
+      baseHour = parts[0];
+      baseMin = parts[1];
+    }
+    const dt = new Date(now);
+    dt.setHours(baseHour + 1, baseMin, 0, 0);
+    targetTime = `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    if (dt.getDate() !== now.getDate()) {
+      targetDate = formatDate(dt);
+    }
+    return { newDate: targetDate, newTime: targetTime, label: `1 Saat (${targetTime})` };
+  }
+
+  // "2 saat" / "2s" / "+2"
+  if (raw === "2 saat" || raw === "2s" || raw === "+2") {
+    let baseHour = now.getHours();
+    let baseMin = now.getMinutes();
+    if (targetTime) {
+      const parts = targetTime.split(":").map(Number);
+      baseHour = parts[0];
+      baseMin = parts[1];
+    }
+    const dt = new Date(now);
+    dt.setHours(baseHour + 2, baseMin, 0, 0);
+    targetTime = `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    if (dt.getDate() !== now.getDate()) {
+      targetDate = formatDate(dt);
+    }
+    return { newDate: targetDate, newTime: targetTime, label: `2 Saat (${targetTime})` };
+  }
+
+  // "yarin", "30.10", "16:00" vb. ayrıştırma
+  const parsed = parseDateAndContent(raw);
+  return {
+    newDate: parsed.targetDate,
+    newTime: parsed.targetTime || targetTime,
+    label: `${parsed.dateLabel}${parsed.targetTime ? " " + parsed.targetTime : ""}`,
+  };
+}
+
 export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["message"]>) {
   const text = (msg.text || "").trim();
   const senderChatId = String(msg.chat.id);
@@ -240,22 +322,24 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   // Komutlar
   if (text === "/start" || text === "/yardim" || text === "/help") {
     const helpMsg = `⚡ <b>YDevHub Asistan Komutları</b>\n
-📋 <b>Görev Yönetimi & 1 Saat Kala Hatırlatma:</b>
+📋 <b>Görev Yönetimi & Hatırlatma:</b>
 • <code>/gorev [başlık]</code> - Bugün için genel görev ekler
-• <code>/gorev 15:30 [başlık]</code> - Bugün saat 15:30 için görev <i>(14:30'da otomatik hatırlatır!)</i>
-• <code>/gorev yarin 14:00 [başlık]</code> - Yarın saat 14:00 için görev
-• <code>/gorev 30.10 11:00 [başlık]</code> - Belirli gün ve saat
-• <code>/tamam [ID]</code> veya <code>/tamamla [ID]</code> - Görevi tamamlandı yapar!
+• <code>/gorev 15:30 [başlık]</code> - Belirli saat için görev <i>(1 saat önce hatırlatır)</i>
+• <code>/gorev yarin 14:00 [başlık]</code> - Yarın saatli görev
+• <code>/tamam g2</code> - [G-2] numaralı görevi tamamlar
+• <code>/ertele g2</code> - Görevi 1 saat erteler
+• <code>/ertele g2 yarin</code> - Görevi yarına erteler
 
-📝 <b>Not Alma & Tarih Seçimi:</b>
+📝 <b>Not Alma & Erteleme:</b>
 • <i>Düz metin:</i> Doğrudan bugünün notlarına ekler.
 • <code>/not [not]</code> - Bugünün notlarına ekler
-• <code>/not yarin [not]</code> veya <code>/not [yarin] [not]</code> - Yarının notlarına ekler
-• <code>/not YYYY-AA-GG [not]</code> veya <code>/not GG.AA [not]</code> - Belirli güne ekler
+• <code>/not yarin [not]</code> veya <code>/not 30.10 [not]</code> - Belirli güne ekler
+• <code>/tamam n2</code> veya <code>/ntamam 2</code> - [N-2] notunu tamamlar
+• <code>/ertele n2</code> - Notu yarına erteler
 
-📊 <b>Sistem & Süreç Kontrolü:</b>
+📊 <b>Sistem & Kontrol:</b>
 • <code>/durum</code> veya <code>/ps</code> - Aktif Docker ve sunucu süreçlerini listeler
-• <code>/bugun</code> - Bugünün notlarını ve görevlerini (ID numaralarıyla) döker
+• <code>/bugun</code> - Bugünün notlarını [N-X] ve görevlerini [G-X] döker
 
 ⚙️ <b>Yönetim:</b>
 • <code>/yardim</code> - Bu yardım mesajını gösterir`;
@@ -263,49 +347,196 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     return;
   }
 
-  // /tamam [id] veya /tamamla [id] veya /done [id]
-  if (text.startsWith("/tamam") || text.startsWith("/done") || text.startsWith("/bitir")) {
-    const rawId = text.replace(/^\/(tamamla|tamam|done|bitir)\s*/i, "").replace(/^#/, "").trim();
-    const targetId = parseInt(rawId, 10);
-    if (isNaN(targetId) || targetId <= 0) {
+  // /tamam, /ntamam, /gtamam
+  const isDedicatedNoteDone = text.startsWith("/ntamam") || text.startsWith("/nottamama");
+  const isDedicatedTaskDone = text.startsWith("/gtamam") || text.startsWith("/gorevtamam");
+  const isGenericDone = text.startsWith("/tamam") || text.startsWith("/done") || text.startsWith("/bitir");
+
+  if (isDedicatedNoteDone || isDedicatedTaskDone || isGenericDone) {
+    let rawArg = "";
+    let forcedType: "note" | "task" | null = null;
+
+    if (isDedicatedNoteDone) {
+      rawArg = text.replace(/^\/(ntamam|nottamama)\s*/i, "").trim();
+      forcedType = "note";
+    } else if (isDedicatedTaskDone) {
+      rawArg = text.replace(/^\/(gtamam|gorevtamam)\s*/i, "").trim();
+      forcedType = "task";
+    } else {
+      rawArg = text.replace(/^\/(tamamla|tamam|done|bitir)\s*/i, "").trim();
+    }
+
+    const parsedTarget = parseTargetIdentifier(rawArg);
+    if (!parsedTarget) {
       await sendTelegramMessage(
         senderChatId,
-        "⚠️ Lütfen tamamlanacak görev veya not ID'sini belirtin.\nÖrnek: <code>/tamam 5</code>"
+        `⚠️ Lütfen tamamlanacak ID'yi belirtin.\n• <b>Not için:</b> <code>/tamam n2</code>\n• <b>Görev için:</b> <code>/tamam g2</code>`
       );
       return;
     }
 
-    // 1) Görevlerde ara
+    const targetType = forcedType || parsedTarget.type;
+    const targetId = parsedTarget.id;
+
+    if (targetType === "note") {
+      const dailyNote = db
+        .prepare("SELECT id, content, is_done, date FROM daily_notes WHERE id = ?")
+        .get(targetId) as { id: number; content: string; is_done: number; date: string } | undefined;
+
+      if (!dailyNote) {
+        await sendTelegramMessage(senderChatId, `❌ <b>[N-${targetId}]</b> numaralı gündelik not bulunamadı.`);
+        return;
+      }
+      db.prepare("UPDATE daily_notes SET is_done = 1 WHERE id = ?").run(targetId);
+      await sendTelegramMessage(
+        senderChatId,
+        `✅ <b>Gündelik Not Tamamlandı!</b>\n📝 <b>[N-${dailyNote.id}]</b> <s>${escapeHtml(dailyNote.content)}</s> (${dailyNote.date})`
+      );
+      return;
+    }
+
+    if (targetType === "task") {
+      const task = db
+        .prepare("SELECT id, title, status FROM tasks WHERE id = ?")
+        .get(targetId) as { id: number; title: string; status: string } | undefined;
+
+      if (!task) {
+        await sendTelegramMessage(senderChatId, `❌ <b>[G-${targetId}]</b> numaralı görev bulunamadı.`);
+        return;
+      }
+      db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(targetId);
+      await sendTelegramMessage(
+        senderChatId,
+        `✅ <b>Görev Tamamlandı!</b>\n📌 <b>[G-${task.id}]</b> <s>${escapeHtml(task.title)}</s>`
+      );
+      return;
+    }
+
+    // Otomatik ayrıştırma (saf numara örn: /tamam 2)
     const task = db
       .prepare("SELECT id, title, status FROM tasks WHERE id = ?")
       .get(targetId) as { id: number; title: string; status: string } | undefined;
+
+    const dailyNote = db
+      .prepare("SELECT id, content, is_done, date FROM daily_notes WHERE id = ?")
+      .get(targetId) as { id: number; content: string; is_done: number; date: string } | undefined;
+
+    // İkisi de varsa ve ikisi de açıksa kullanıcıya net seçenek sun
+    if (task && dailyNote && task.status !== "done" && dailyNote.is_done === 0) {
+      await sendTelegramMessage(
+        senderChatId,
+        `⚠️ <b>Birden Fazla Eşleşme Var (#${targetId}):</b>\n• Notu tamamlamak için: <code>/tamam n${targetId}</code>\n• Görevi tamamlamak için: <code>/tamam g${targetId}</code>`
+      );
+      return;
+    }
+
+    if (dailyNote && dailyNote.is_done === 0) {
+      db.prepare("UPDATE daily_notes SET is_done = 1 WHERE id = ?").run(targetId);
+      await sendTelegramMessage(
+        senderChatId,
+        `✅ <b>Gündelik Not Tamamlandı!</b>\n📝 <b>[N-${dailyNote.id}]</b> <s>${escapeHtml(dailyNote.content)}</s> (${dailyNote.date})`
+      );
+      return;
+    }
 
     if (task) {
       db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(targetId);
       await sendTelegramMessage(
         senderChatId,
-        `✅ <b>Görev Tamamlandı!</b>\n📌 <b>[#${task.id}]</b> <s>${escapeHtml(task.title)}</s>`
+        `✅ <b>Görev Tamamlandı!</b>\n📌 <b>[G-${task.id}]</b> <s>${escapeHtml(task.title)}</s>`
       );
       return;
     }
-
-    // 2) Gündelik notlarda ara
-    const dailyNote = db
-      .prepare("SELECT id, content, is_done, date FROM daily_notes WHERE id = ?")
-      .get(targetId) as { id: number; content: string; is_done: number; date: string } | undefined;
 
     if (dailyNote) {
       db.prepare("UPDATE daily_notes SET is_done = 1 WHERE id = ?").run(targetId);
       await sendTelegramMessage(
         senderChatId,
-        `✅ <b>Gündelik Not Tamamlandı!</b>\n📝 <b>[#${dailyNote.id}]</b> <s>${escapeHtml(dailyNote.content)}</s> (${dailyNote.date})`
+        `✅ <b>Gündelik Not Tamamlandı!</b>\n📝 <b>[N-${dailyNote.id}]</b> <s>${escapeHtml(dailyNote.content)}</s> (${dailyNote.date})`
       );
       return;
     }
 
+    await sendTelegramMessage(senderChatId, `❌ #${targetId} numaralı açık görev veya not bulunamadı.`);
+    return;
+  }
+
+  // /ertele [hedef] [süre/saat/gün]
+  if (text.startsWith("/ertele") || text.startsWith("/snooze") || text.startsWith("/postpone")) {
+    const rawRest = text.replace(/^\/(ertele|snooze|postpone)\s*/i, "").trim();
+    if (!rawRest) {
+      await sendTelegramMessage(
+        senderChatId,
+        `⚠️ <b>Erteleme Kullanımı:</b>\n• <code>/ertele g2</code> (1 saat ertele)\n• <code>/ertele g2 15:30</code> (Saati 15:30 yap)\n• <code>/ertele g2 yarin</code> (Yarına ertele)\n• <code>/ertele n2</code> veya <code>/ertele n2 yarin</code> (Notu yarına ertele)`
+      );
+      return;
+    }
+
+    const match = rawRest.match(/^(\S+)(?:\s+(.*))?$/s);
+    const targetToken = match ? match[1] : rawRest;
+    const snoozeArgs = match && match[2] ? match[2].trim() : "";
+
+    const parsedTarget = parseTargetIdentifier(targetToken);
+    if (!parsedTarget) {
+      await sendTelegramMessage(
+        senderChatId,
+        `⚠️ Geçersiz hedef. Örnek: <code>/ertele g2 1 saat</code> veya <code>/ertele n2 yarin</code>`
+      );
+      return;
+    }
+
+    let targetType = parsedTarget.type;
+    const targetId = parsedTarget.id;
+
+    if (targetType === "auto") {
+      const task = db.prepare("SELECT id FROM tasks WHERE id = ?").get(targetId);
+      const note = db.prepare("SELECT id FROM daily_notes WHERE id = ?").get(targetId);
+      if (task && note) {
+        await sendTelegramMessage(
+          senderChatId,
+          `⚠️ <b>Birden Fazla Eşleşme Var (#${targetId}):</b>\n• Görev için: <code>/ertele g${targetId} ${snoozeArgs}</code>\n• Not için: <code>/ertele n${targetId} ${snoozeArgs}</code>`
+        );
+        return;
+      }
+      targetType = task ? "task" : "note";
+    }
+
+    if (targetType === "note") {
+      const note = db
+        .prepare("SELECT * FROM daily_notes WHERE id = ?")
+        .get(targetId) as any;
+
+      if (!note) {
+        await sendTelegramMessage(senderChatId, `❌ <b>[N-${targetId}]</b> numaralı gündelik not bulunamadı.`);
+        return;
+      }
+
+      const postponed = computePostponedTimeAndDate(note.date, "", snoozeArgs || "yarin");
+      db.prepare("UPDATE daily_notes SET date = ?, is_done = 0 WHERE id = ?").run(postponed.newDate, targetId);
+
+      await sendTelegramMessage(
+        senderChatId,
+        `⏰ <b>Gündelik Not Ertelendi!</b>\n📝 <b>[N-${note.id}]</b> ${escapeHtml(note.content)}\n📅 <b>Yeni Gün:</b> ${postponed.newDate}`
+      );
+      return;
+    }
+
+    // Görev Erteleme
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(targetId) as any;
+    if (!task) {
+      await sendTelegramMessage(senderChatId, `❌ <b>[G-${targetId}]</b> numaralı görev bulunamadı.`);
+      return;
+    }
+
+    const postponed = computePostponedTimeAndDate(task.due_date, task.due_time, snoozeArgs);
+    db.prepare(
+      "UPDATE tasks SET due_date = ?, due_time = ?, reminder_sent = 0, status = 'todo' WHERE id = ?"
+    ).run(postponed.newDate, postponed.newTime || null, targetId);
+
+    const timeStr = postponed.newTime ? ` ⏰ <b>${postponed.newTime}</b>` : "";
     await sendTelegramMessage(
       senderChatId,
-      `❌ <b>Bulunamadı:</b> #${targetId} numaralı açık görev veya not bulunamadı.`
+      `⏰ <b>Görev Ertelendi!</b>\n📌 <b>[G-${task.id}]</b> ${escapeHtml(task.title)}\n📅 <b>Yeni Zaman:</b> ${postponed.newDate}${timeStr}\n<i>(1 saat kala tekrar hatırlatılacak)</i>`
     );
     return;
   }
@@ -360,7 +591,7 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
       for (const n of dailyNotes) {
         const check = n.is_done ? "✅ <s>" : "▫️ ";
         const end = n.is_done ? "</s>" : "";
-        rep += `${check}<b>[#${n.id}]</b> ${escapeHtml(n.content)}${end}\n`;
+        rep += `${check}<b>[N-${n.id}]</b> ${escapeHtml(n.content)}${end}\n`;
       }
     }
 
@@ -370,10 +601,12 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     } else {
       for (const t of pendingTasks) {
         const timeStr = t.due_time ? ` [⏰ ${t.due_time}]` : "";
-        rep += `• <b>[#${t.id}]</b> <b>${escapeHtml(t.title)}</b>${timeStr} (${t.priority})\n`;
+        rep += `• <b>[G-${t.id}]</b> <b>${escapeHtml(t.title)}</b>${timeStr} (${t.priority})\n`;
       }
-      rep += `\n💡 <i>Görevi tamamlamak için:</i> <code>/tamam &lt;ID&gt;</code>\n`;
     }
+
+    rep += `\n💡 <i>Tamamlamak:</i> <code>/tamam n2</code> veya <code>/tamam g2</code>\n`;
+    rep += `⏰ <i>Ertelemek:</i> <code>/ertele g2 1 saat</code> veya <code>/ertele n2 yarin</code>\n`;
 
     await sendTelegramMessage(senderChatId, rep);
     return;
@@ -405,7 +638,7 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
 
     await sendTelegramMessage(
       senderChatId,
-      `✅ <b>Görev Eklendi!</b>\n📌 <b>[#${newTaskId}]</b> ${escapeHtml(content)}\n📅 <b>Tarih/Saat:</b> ${dateLabel}${timeDisplay}\n\n💡 <i>Tamamlamak için:</i> <code>/tamam ${newTaskId}</code>`
+      `✅ <b>Görev Eklendi!</b>\n📌 <b>[G-${newTaskId}]</b> ${escapeHtml(content)}\n📅 <b>Tarih/Saat:</b> ${dateLabel}${timeDisplay}\n\n💡 <i>Tamamlamak:</i> <code>/tamam g${newTaskId}</code> | <i>Ertelemek:</i> <code>/ertele g${newTaskId}</code>`
     );
     return;
   }
@@ -442,7 +675,7 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
 
     await sendTelegramMessage(
       senderChatId,
-      `📝 <b>Gündelik Nota Kaydedildi (${dateLabel}${timeDisplay}):</b>\n<b>[#${noteId}]</b> "<i>${escapeHtml(content)}</i>"\n\n💡 <i>Tamamlamak için:</i> <code>/tamam ${noteId}</code>`
+      `📝 <b>Gündelik Nota Kaydedildi (${dateLabel}${timeDisplay}):</b>\n<b>[N-${noteId}]</b> "<i>${escapeHtml(content)}</i>"\n\n💡 <i>Tamamlamak:</i> <code>/tamam n${noteId}</code> | <i>Ertelemek:</i> <code>/ertele n${noteId}</code>`
     );
     return;
   }
