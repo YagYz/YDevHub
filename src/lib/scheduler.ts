@@ -75,7 +75,8 @@ export async function checkMorningSummary(now: Date = new Date()): Promise<void>
       for (const n of dailyNotes) {
         const icon = n.is_done ? "✅ <s>" : "▫️ ";
         const end = n.is_done ? "</s>" : "";
-        msg += `${icon}[N-${n.id}] ${escapeHtml(n.content)}${end}\n`;
+        const timePart = n.due_time ? ` [⏰ <b>${n.due_time}</b>]` : "";
+        msg += `${icon}[N-${n.id}] ${escapeHtml(n.content)}${timePart}${end}\n`;
       }
     }
 

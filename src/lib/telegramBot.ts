@@ -68,6 +68,27 @@ export async function sendTelegramMessage(
   }
 }
 
+const TURKISH_MONTHS: Record<string, number> = {
+  ocak: 1,
+  subat: 2,
+  şubat: 2,
+  mart: 3,
+  nisan: 4,
+  mayis: 5,
+  mayıs: 5,
+  haziran: 6,
+  temmuz: 7,
+  agustos: 8,
+  ağustos: 8,
+  eylul: 9,
+  eylül: 9,
+  ekim: 10,
+  kasim: 11,
+  kasım: 11,
+  aralik: 12,
+  aralık: 12,
+};
+
 export function resolveDateString(str: string, now: Date = new Date()): { iso: string; label: string } | null {
   const pad = (n: number) => String(n).padStart(2, "0");
   const formatDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -88,31 +109,48 @@ export function resolveDateString(str: string, now: Date = new Date()): { iso: s
     return { iso: formatDate(yesterday), label: `Dün (${formatDate(yesterday)})` };
   }
 
-  // YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
-    return { iso: clean, label: clean };
+  // YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD
+  const yyyymmdd = clean.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);
+  if (yyyymmdd) {
+    const y = Number(yyyymmdd[1]);
+    const m = Number(yyyymmdd[2]);
+    const d = Number(yyyymmdd[3]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      const iso = `${y}-${pad(m)}-${pad(d)}`;
+      return { iso, label: iso };
+    }
   }
 
-  // DD.MM.YYYY
-  const ddmmyyyy = clean.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  // DD-MM-YYYY, DD.MM.YYYY, DD/MM/YYYY
+  const ddmmyyyy = clean.match(/^(\d{1,2})[-./](\d{1,2})[-./](\d{4})$/);
   if (ddmmyyyy) {
-    const iso = `${ddmmyyyy[3]}-${pad(Number(ddmmyyyy[2]))}-${pad(Number(ddmmyyyy[1]))}`;
-    return { iso, label: iso };
+    const d = Number(ddmmyyyy[1]);
+    const m = Number(ddmmyyyy[2]);
+    const y = Number(ddmmyyyy[3]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      const iso = `${y}-${pad(m)}-${pad(d)}`;
+      return { iso, label: iso };
+    }
   }
 
-  // DD.MM (bu yıl)
-  const ddmm = clean.match(/^(\d{1,2})\.(\d{1,2})$/);
+  // DD-MM, DD.MM, DD/MM (bu yıl)
+  const ddmm = clean.match(/^(\d{1,2})[-./](\d{1,2})$/);
   if (ddmm) {
-    const iso = `${now.getFullYear()}-${pad(Number(ddmm[2]))}-${pad(Number(ddmm[1]))}`;
-    return { iso, label: iso };
+    const d = Number(ddmm[1]);
+    const m = Number(ddmm[2]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      const iso = `${now.getFullYear()}-${pad(m)}-${pad(d)}`;
+      return { iso, label: iso };
+    }
   }
 
   return null;
 }
 
 export function resolveTimeString(str: string): string | null {
-  const clean = str.replace(/[\[\]]/g, "").trim();
-  const timeMatch = clean.match(/^([0-1]?[0-9]|2[0-3])[:.]([0-5][0-9])$/);
+  const clean = str.replace(/[\[\]]/g, "").trim().toLowerCase();
+  const stripped = clean.replace(/^(?:saat|saati)\s*/i, "").replace(/['’](?:te|ta|de|da)$/i, "");
+  const timeMatch = stripped.match(/^([0-1]?[0-9]|2[0-3])[:.]([0-5][0-9])$/);
   if (timeMatch) {
     const h = String(timeMatch[1]).padStart(2, "0");
     const m = String(timeMatch[2]).padStart(2, "0");
@@ -136,36 +174,89 @@ export function parseDateAndContent(raw: string): {
   let targetTime = "";
   let dateLabel = "Bugün";
 
-  // 1) Köşeli parantez: [yarin 14:30] veya [14:30] veya [30.10]
+  // 1) Köşeli parantez: [yarin 14:30] veya [04-11-2026 14:00] veya [4 kasım 14:00]
   const bracketMatch = text.match(/^\[(.*?)\]\s*(.*)$/s);
   if (bracketMatch) {
     const tag = bracketMatch[1].trim();
     const rest = bracketMatch[2].trim();
     const tagParts = tag.split(/\s+/);
 
-    for (const part of tagParts) {
-      const d = resolveDateString(part, now);
+    let i = 0;
+    while (i < tagParts.length) {
+      const dayNum = Number(tagParts[i]);
+      if (dayNum >= 1 && dayNum <= 31 && i + 1 < tagParts.length) {
+        const monthKey = tagParts[i + 1].toLowerCase();
+        if (TURKISH_MONTHS[monthKey]) {
+          const m = TURKISH_MONTHS[monthKey];
+          let y = now.getFullYear();
+          let advance = 2;
+          if (i + 2 < tagParts.length && /^\d{4}$/.test(tagParts[i + 2])) {
+            y = Number(tagParts[i + 2]);
+            advance = 3;
+          }
+          targetDate = `${y}-${pad(m)}-${pad(dayNum)}`;
+          dateLabel = targetDate;
+          i += advance;
+          continue;
+        }
+      }
+
+      const d = resolveDateString(tagParts[i], now);
       if (d) {
         targetDate = d.iso;
         dateLabel = d.label;
+        i++;
         continue;
       }
-      const t = resolveTimeString(part);
+      const t = resolveTimeString(tagParts[i]);
       if (t) {
         targetTime = t;
+        i++;
         continue;
       }
+      i++;
     }
     text = rest;
   }
 
   // 2) Başlangıçtaki kelimeleri tara (tarih ve/veya saat)
-  // Örn: "yarin 15:00 toplantı" veya "15:00 toplantı" veya "30.10 14:00 bakım"
   let words = text.split(/\s+/);
   let changed = true;
 
-  while (changed && words.length > 1) {
+  while (changed && words.length > 0) {
     changed = false;
+
+    // "saat 14:00" kalıbı
+    if (words[0].toLowerCase().startsWith("saat") && words.length > 1) {
+      const nextT = resolveTimeString(words[1]);
+      if (nextT) {
+        targetTime = nextT;
+        words.splice(0, 2);
+        changed = true;
+        continue;
+      }
+    }
+
+    // "4 kasım 2026" veya "4 kasım" kalıbı
+    const dayNum = Number(words[0]);
+    if (dayNum >= 1 && dayNum <= 31 && words.length > 1) {
+      const monthKey = words[1].toLowerCase();
+      if (TURKISH_MONTHS[monthKey]) {
+        const m = TURKISH_MONTHS[monthKey];
+        let y = now.getFullYear();
+        let removeCount = 2;
+        if (words.length > 2 && /^\d{4}$/.test(words[2])) {
+          y = Number(words[2]);
+          removeCount = 3;
+        }
+        targetDate = `${y}-${pad(m)}-${pad(dayNum)}`;
+        dateLabel = targetDate;
+        words.splice(0, removeCount);
+        changed = true;
+        continue;
+      }
+    }
+
     const w = words[0];
     const d = resolveDateString(w, now);
     if (d) {
@@ -175,6 +266,7 @@ export function parseDateAndContent(raw: string): {
       changed = true;
       continue;
     }
+
     const t = resolveTimeString(w);
     if (t) {
       targetTime = t;
@@ -195,6 +287,8 @@ export function parseDateAndContent(raw: string): {
       targetTime = `${h}:${m}`;
     }
   }
+
+  text = text.replace(/^[-–—:\s]+/, "").trim();
 
   return { targetDate, targetTime, content: text, dateLabel };
 }
@@ -320,19 +414,20 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   const db = getDb();
 
   // Komutlar
-  if (text === "/start" || text === "/yardim" || text === "/help") {
+  if (/^[/]?(?:start|yardim|help)$/i.test(text)) {
     const helpMsg = `⚡ <b>YDevHub Asistan Komutları</b>\n
 📋 <b>Görev Yönetimi & Hatırlatma:</b>
-• <code>/gorev [başlık]</code> - Bugün için genel görev ekler
+• <code>/gorev [başlık]</code> veya <code>gorev [başlık]</code> - Bugün için genel görev ekler
 • <code>/gorev 15:30 [başlık]</code> - Belirli saat için görev <i>(1 saat önce hatırlatır)</i>
-• <code>/gorev yarin 14:00 [başlık]</code> - Yarın saatli görev
+• <code>/gorev 04-11-2026 14:00 [başlık]</code> - Tarihli ve saatli görev
 • <code>/tamam g2</code> - [G-2] numaralı görevi tamamlar
 • <code>/ertele g2</code> - Görevi 1 saat erteler
 • <code>/ertele g2 yarin</code> - Görevi yarına erteler
 
 📝 <b>Not Alma & Erteleme:</b>
 • <i>Düz metin:</i> Doğrudan bugünün notlarına ekler.
-• <code>/not [not]</code> - Bugünün notlarına ekler
+• <code>/not [not]</code> veya <code>not [not]</code> - Bugünün notlarına ekler
+• <code>/not 04-11-2026 14:00 [not]</code> veya <code>04-11-2026 14:00 [not]</code> - Belirli tarih ve saate ekler
 • <code>/not yarin [not]</code> veya <code>/not 30.10 [not]</code> - Belirli güne ekler
 • <code>/tamam n2</code> veya <code>/ntamam 2</code> - [N-2] notunu tamamlar
 • <code>/ertele n2</code> - Notu yarına erteler
@@ -347,23 +442,23 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     return;
   }
 
-  // /tamam, /ntamam, /gtamam
-  const isDedicatedNoteDone = text.startsWith("/ntamam") || text.startsWith("/nottamama");
-  const isDedicatedTaskDone = text.startsWith("/gtamam") || text.startsWith("/gorevtamam");
-  const isGenericDone = text.startsWith("/tamam") || text.startsWith("/done") || text.startsWith("/bitir");
+  // tamam, /tamam, ntamam, /ntamam, gtamam, /gtamam
+  const isDedicatedNoteDone = /^[/]?(?:ntamam|nottamama)\b/i.test(text);
+  const isDedicatedTaskDone = /^[/]?(?:gtamam|gorevtamam)\b/i.test(text);
+  const isGenericDone = /^[/]?(?:tamamla|tamam|done|bitir)\b/i.test(text);
 
   if (isDedicatedNoteDone || isDedicatedTaskDone || isGenericDone) {
     let rawArg = "";
     let forcedType: "note" | "task" | null = null;
 
     if (isDedicatedNoteDone) {
-      rawArg = text.replace(/^\/(ntamam|nottamama)\s*/i, "").trim();
+      rawArg = text.replace(/^[/]?(?:ntamam|nottamama)\s*/i, "").trim();
       forcedType = "note";
     } else if (isDedicatedTaskDone) {
-      rawArg = text.replace(/^\/(gtamam|gorevtamam)\s*/i, "").trim();
+      rawArg = text.replace(/^[/]?(?:gtamam|gorevtamam)\s*/i, "").trim();
       forcedType = "task";
     } else {
-      rawArg = text.replace(/^\/(tamamla|tamam|done|bitir)\s*/i, "").trim();
+      rawArg = text.replace(/^[/]?(?:tamamla|tamam|done|bitir)\s*/i, "").trim();
     }
 
     const parsedTarget = parseTargetIdentifier(rawArg);
@@ -461,9 +556,9 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     return;
   }
 
-  // /ertele [hedef] [süre/saat/gün]
-  if (text.startsWith("/ertele") || text.startsWith("/snooze") || text.startsWith("/postpone")) {
-    const rawRest = text.replace(/^\/(ertele|snooze|postpone)\s*/i, "").trim();
+  // ertele, /ertele [hedef] [süre/saat/gün]
+  if (/^[/]?(?:ertele|snooze|postpone)\b/i.test(text)) {
+    const rawRest = text.replace(/^[/]?(?:ertele|snooze|postpone)\s*/i, "").trim();
     if (!rawRest) {
       await sendTelegramMessage(
         senderChatId,
@@ -511,12 +606,17 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
         return;
       }
 
-      const postponed = computePostponedTimeAndDate(note.date, "", snoozeArgs || "yarin");
-      db.prepare("UPDATE daily_notes SET date = ?, is_done = 0 WHERE id = ?").run(postponed.newDate, targetId);
+      const postponed = computePostponedTimeAndDate(note.date, note.due_time || "", snoozeArgs || "yarin");
+      db.prepare("UPDATE daily_notes SET date = ?, due_time = ?, is_done = 0 WHERE id = ?").run(
+        postponed.newDate,
+        postponed.newTime || "",
+        targetId
+      );
 
+      const timeStr = postponed.newTime ? ` ⏰ <b>${postponed.newTime}</b>` : "";
       await sendTelegramMessage(
         senderChatId,
-        `⏰ <b>Gündelik Not Ertelendi!</b>\n📝 <b>[N-${note.id}]</b> ${escapeHtml(note.content)}\n📅 <b>Yeni Gün:</b> ${postponed.newDate}`
+        `⏰ <b>Gündelik Not Ertelendi!</b>\n📝 <b>[N-${note.id}]</b> ${escapeHtml(note.content)}\n📅 <b>Yeni Zaman:</b> ${postponed.newDate}${timeStr}`
       );
       return;
     }
@@ -541,8 +641,8 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     return;
   }
 
-  // /durum veya /ps
-  if (text === "/durum" || text === "/ps" || text === "/sistem") {
+  // durum, /durum, ps, /ps, sistem, /sistem
+  if (/^[/]?(?:durum|ps|sistem)$/i.test(text)) {
     try {
       const status = await getSystemStatus();
       let report = `🖥️ <b>Sunucu Durumu: ${status.hostname}</b>\n`;
@@ -571,8 +671,8 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     return;
   }
 
-  // /bugun
-  if (text === "/bugun" || text === "/today") {
+  // bugun, /bugun, today, /today
+  if (/^[/]?(?:bugun|bugün|today)$/i.test(text)) {
     const dailyNotes = db
       .prepare("SELECT * FROM daily_notes WHERE date = ? ORDER BY is_done ASC, created_at ASC")
       .all(today) as any[];
@@ -591,7 +691,8 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
       for (const n of dailyNotes) {
         const check = n.is_done ? "✅ <s>" : "▫️ ";
         const end = n.is_done ? "</s>" : "";
-        rep += `${check}<b>[N-${n.id}]</b> ${escapeHtml(n.content)}${end}\n`;
+        const timeStr = n.due_time ? ` [⏰ ${n.due_time}]` : "";
+        rep += `${check}<b>[N-${n.id}]</b> ${escapeHtml(n.content)}${timeStr}${end}\n`;
       }
     }
 
@@ -612,13 +713,14 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     return;
   }
 
-  // /gorev [başlık]
-  if (text.startsWith("/gorev ") || text.startsWith("/task ")) {
-    const rawTask = text.replace(/^\/(gorev|task)\s+/, "").trim();
+  // gorev, /gorev, task, /task [başlık]
+  const isGorev = /^[/]?(?:gorev|görev|task)\b/i.test(text);
+  if (isGorev) {
+    const rawTask = text.replace(/^[/]?(?:gorev|görev|task)[:\s]*/i, "").trim();
     if (!rawTask) {
       await sendTelegramMessage(
         senderChatId,
-        "⚠️ Lütfen görev başlığı yazınız: <code>/gorev [tarih] [saat] Başlık</code>\nÖrnek: <code>/gorev 15:30 Sunucu bakımı</code>"
+        "⚠️ Lütfen görev başlığı yazınız: <code>/gorev [tarih] [saat] Başlık</code>\nÖrnek: <code>/gorev 04-11-2026 14:00 Sunucu bakımı</code>"
       );
       return;
     }
@@ -643,19 +745,19 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     return;
   }
 
-  // /not veya /n tek başına gönderilirse format yardımı
-  if (text === "/not" || text === "/n") {
+  // not, /not veya n, /n tek başına gönderilirse format yardımı
+  if (/^[/]?(?:not|n)$/i.test(text)) {
     await sendTelegramMessage(
       senderChatId,
-      `⚠️ <b>Not Ekleme Formatı:</b>\n• <code>/not [içerik]</code> (Bugün)\n• <code>/not yarin [içerik]</code> (Yarın)\n• <code>/not 2026-10-31 [içerik]</code> (Tarih)\n• <code>/not 30.10 14:00 [içerik]</code> (Tarih + Saat)`
+      `⚠️ <b>Not Ekleme Formatı:</b>\n• <code>/not [içerik]</code> veya doğrudan metin (Bugün)\n• <code>/not 04-11-2026 14:00 [içerik]</code> (Tarih + Saat)\n• <code>/not yarin [içerik]</code> (Yarın)\n• <code>/not 4 kasım 14:00 [içerik]</code> (Türkçe Tarih)`
     );
     return;
   }
 
-  // /not [içerik] veya doğrudan düz metin gönderme
+  // not [içerik] veya /not [içerik] veya doğrudan düz metin gönderme
   let noteRaw = text;
-  if (text.startsWith("/not ") || text.startsWith("/n ")) {
-    noteRaw = text.replace(/^\/(not|n)\s+/, "").trim();
+  if (/^[/]?(?:not|n)[:\s]+/i.test(text)) {
+    noteRaw = text.replace(/^[/]?(?:not|n)[:\s]+/i, "").trim();
   }
 
   if (noteRaw) {
@@ -667,11 +769,11 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
     }
 
     const info = db.prepare(
-      "INSERT INTO daily_notes (content, date, is_done, priority, source) VALUES (?, ?, 0, 'medium', 'telegram')"
-    ).run(content, targetDate);
+      "INSERT INTO daily_notes (content, date, due_time, is_done, priority, source) VALUES (?, ?, ?, 0, 'medium', 'telegram')"
+    ).run(content, targetDate, targetTime || "");
 
     const noteId = Number(info.lastInsertRowid);
-    const timeDisplay = targetTime ? ` ⏰ ${targetTime}` : "";
+    const timeDisplay = targetTime ? ` ⏰ <b>${targetTime}</b>` : "";
 
     await sendTelegramMessage(
       senderChatId,

@@ -23,6 +23,7 @@ export type DailyNote = {
   is_done: boolean;
   priority: "low" | "medium" | "high";
   source: "web" | "telegram";
+  due_time?: string;
   created_at: string;
   updated_at?: string;
 };
@@ -413,7 +414,7 @@ export default function DailyNotesPanel({ onRefreshStats }: DailyNotesPanelProps
                       <span className="text-zinc-500 flex items-center gap-1 font-mono">
                         <Clock className="w-3 h-3" />
                         {note.date}
-                        {note.created_at && ` • ${note.created_at.slice(11, 16)}`}
+                        {note.due_time ? ` • ⏰ ${note.due_time}` : (note.created_at && ` • ${note.created_at.slice(11, 16)}`)}
                       </span>
                     </div>
                   </div>
