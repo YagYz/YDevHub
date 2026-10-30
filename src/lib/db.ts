@@ -200,6 +200,7 @@ function initSchema(db: DatabaseSync) {
   ensureColumn(db, "tasks", "due_time", "TEXT DEFAULT ''");
   ensureColumn(db, "tasks", "reminder_sent", "INTEGER DEFAULT 0");
   ensureColumn(db, "daily_notes", "source", "TEXT DEFAULT 'web'");
+  ensureColumn(db, "daily_notes", "due_time", "TEXT DEFAULT ''");
 
   // Initialize default admin password if not set
   const existingPass = db

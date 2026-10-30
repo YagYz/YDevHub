@@ -47,15 +47,16 @@ export async function POST(req: NextRequest) {
 
     const today = new Date().toISOString().slice(0, 10);
     const date = body.date || today;
+    const dueTime = body.due_time || "";
     const priority = body.priority || "medium";
     const source = body.source || "web";
 
     const db = getDb();
     const result = db
       .prepare(
-        "INSERT INTO daily_notes (content, date, is_done, priority, source) VALUES (?, ?, 0, ?, ?)"
+        "INSERT INTO daily_notes (content, date, due_time, is_done, priority, source) VALUES (?, ?, ?, 0, ?, ?)"
       )
-      .run(content, date, priority, source);
+      .run(content, date, dueTime, priority, source);
 
     const inserted = db
       .prepare("SELECT * FROM daily_notes WHERE id = ?")
@@ -79,7 +80,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { id, is_done, content, priority } = body;
+    const { id, is_done, content, priority, due_time } = body;
 
     if (!id) {
       return NextResponse.json({ error: "ID belirtilmedi" }, { status: 400 });
@@ -94,10 +95,11 @@ export async function PATCH(req: NextRequest) {
     const newDone = typeof is_done === "boolean" ? (is_done ? 1 : 0) : existing.is_done;
     const newContent = content !== undefined ? String(content).trim() : existing.content;
     const newPriority = priority !== undefined ? priority : existing.priority;
+    const newDueTime = due_time !== undefined ? String(due_time).trim() : (existing.due_time || "");
 
     db.prepare(
-      "UPDATE daily_notes SET content = ?, is_done = ?, priority = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(newContent, newDone, newPriority, id);
+      "UPDATE daily_notes SET content = ?, is_done = ?, priority = ?, due_time = ?, updated_at = datetime('now') WHERE id = ?"
+    ).run(newContent, newDone, newPriority, newDueTime, id);
 
     const updated = db.prepare("SELECT * FROM daily_notes WHERE id = ?").get(id) as any;
 
