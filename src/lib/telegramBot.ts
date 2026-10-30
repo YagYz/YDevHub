@@ -1,5 +1,11 @@
 import { getDb, getSetting, setSetting } from "./db";
-import { getSystemStatus } from "./systemMonitor";
+import { getSystemStatus, restartDockerContainer } from "./systemMonitor";
+import {
+  getYNetMonSummary,
+  getAdGuardStats,
+  setAdGuardProtection,
+  formatBitsPerSec,
+} from "./integrations";
 
 export interface TelegramUpdate {
   update_id: number;
@@ -417,8 +423,8 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   if (/^[/]?(?:start|yardim|help)$/i.test(text)) {
     const helpMsg = `⚡ <b>YDevHub Asistan Komutları</b>\n
 📋 <b>Görev Yönetimi & Hatırlatma:</b>
-• <code>/gorev [başlık]</code> veya <code>gorev [başlık]</code> - Bugün için genel görev ekler
-• <code>/gorev 15:30 [başlık]</code> - Belirli saat için görev <i>(1 saat önce hatırlatır)</i>
+• <code>/gorev [başlık]</code> - Genel görev ekler
+• <code>/gorev 15:30 [başlık]</code> - Saatli görev (1 saat önce hatırlatır)
 • <code>/gorev 04-11-2026 14:00 [başlık]</code> - Tarihli ve saatli görev
 • <code>/tamam g2</code> - [G-2] numaralı görevi tamamlar
 • <code>/ertele g2</code> - Görevi 1 saat erteler
@@ -427,14 +433,20 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
 📝 <b>Not Alma & Erteleme:</b>
 • <i>Düz metin:</i> Doğrudan bugünün notlarına ekler.
 • <code>/not [not]</code> veya <code>not [not]</code> - Bugünün notlarına ekler
-• <code>/not 04-11-2026 14:00 [not]</code> veya <code>04-11-2026 14:00 [not]</code> - Belirli tarih ve saate ekler
-• <code>/not yarin [not]</code> veya <code>/not 30.10 [not]</code> - Belirli güne ekler
-• <code>/tamam n2</code> veya <code>/ntamam 2</code> - [N-2] notunu tamamlar
+• <code>/not 04-11-2026 14:00 [not]</code> - Belirli tarih ve saate ekler
+• <code>/tamam n2</code> - [N-2] notunu tamamlar
 • <code>/ertele n2</code> - Notu yarına erteler
 
-📊 <b>Sistem & Kontrol:</b>
-• <code>/durum</code> veya <code>/ps</code> - Aktif Docker ve sunucu süreçlerini listeler
-• <code>/bugun</code> - Bugünün notlarını [N-X] ve görevlerini [G-X] döker
+🌐 <b>Ağ & DNS (YNetMon & AdGuard):</b>
+• <code>/ag</code> - YNetMon anlık bant genişliği, aktif bağlantı ve alarmlar
+• <code>/dns</code> - AdGuard 24 saatlik reklam/tehdit engelleme raporu
+• <code>/dns kapat 10m</code> - DNS korumasını 10 dakika duraklatır
+• <code>/dns ac</code> - DNS korumasını tekrar açar
+
+🐳 <b>Sistem & Konteyner:</b>
+• <code>/durum</code> veya <code>/ps</code> - Aktif Docker ve sunucu süreçleri
+• <code>/restart [konteyner]</code> - Konteyneri yeniden başlatır (örn: <code>/restart ynetmon</code>)
+• <code>/bugun</code> - Bugünün notlarını ve bekleyen görevlerini döker
 
 ⚙️ <b>Yönetim:</b>
 • <code>/yardim</code> - Bu yardım mesajını gösterir`;
@@ -667,6 +679,136 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
       await sendTelegramMessage(senderChatId, report);
     } catch (err: any) {
       await sendTelegramMessage(senderChatId, `❌ Sistem durumu alınırken hata oluştu: ${err.message}`);
+    }
+    return;
+  }
+
+  // restart, /restart, reboot, /reboot [konteyner]
+  if (/^[/]?(?:restart|reboot)\b/i.test(text)) {
+    const rawTarget = text.replace(/^[/]?(?:restart|reboot)[:\s]*/i, "").trim();
+    if (!rawTarget) {
+      await sendTelegramMessage(
+        senderChatId,
+        "⚠️ Lütfen yeniden başlatılacak konteyner adını yazın.\nÖrnek: <code>/restart ynetmon</code> veya <code>/restart adguard</code>"
+      );
+      return;
+    }
+
+    await sendTelegramMessage(
+      senderChatId,
+      `🔄 <code>${escapeHtml(rawTarget)}</code> yeniden başlatılıyor, lütfen bekleyin...`
+    );
+    const res = await restartDockerContainer(rawTarget);
+    await sendTelegramMessage(senderChatId, res.message);
+    return;
+  }
+
+  // ag, /ag, ynetmon, /ynetmon, net, /net
+  if (/^[/]?(?:ag|ynetmon|net|agdurum)$/i.test(text)) {
+    try {
+      const summary = await getYNetMonSummary();
+      if (!summary) {
+        await sendTelegramMessage(
+          senderChatId,
+          "⚠️ <b>YNetMon servisine ulaşılamadı.</b> Servis kapalı veya entegrasyon anahtarı eksik olabilir."
+        );
+        return;
+      }
+
+      const rx = formatBitsPerSec(summary.rx_bps || 0);
+      const tx = formatBitsPerSec(summary.tx_bps || 0);
+
+      let rep = `🌐 <b>YNetMon Canlı Ağ ve Güvenlik Raporu</b>\n`;
+      rep += `🏠 <b>Sunucu IP:</b> <code>${summary.local_ip}</code>\n`;
+      rep += `📡 <b>Yakalama Modu:</b> <code>${summary.capture_mode}</code>\n\n`;
+      rep += `⚡ <b>Anlık Bant Genişliği:</b>\n`;
+      rep += `⬇️ İndirme: <b>${rx}</b> | ⬆️ Yükleme: <b>${tx}</b>\n\n`;
+      rep += `🔗 <b>Aktif Bağlantılar:</b> ${summary.active_connections}\n`;
+      rep += `📱 <b>Ağdaki Cihazlar:</b> ${summary.storage?.devices_count || 0}\n`;
+      rep += `📦 <b>Kaydedilen Paket:</b> ${(summary.storage?.packets_count || 0).toLocaleString("tr-TR")}\n`;
+      rep += `🗄️ <b>Veritabanı Boyutu:</b> ${summary.storage?.db_size_mb || 0} MB\n`;
+
+      if (summary.recent_alerts && summary.recent_alerts.length > 0) {
+        rep += `\n🚨 <b>Son Güvenlik Alarmları (${summary.recent_alerts.length}):</b>\n`;
+        for (const a of summary.recent_alerts.slice(0, 3)) {
+          const icon = a.severity === "high" ? "🔴" : "🟡";
+          rep += `${icon} <b>${escapeHtml(a.rule_name)}</b>\n`;
+          rep += `   <i>${escapeHtml(a.message)}</i>\n`;
+        }
+      } else {
+        rep += `\n✅ <i>Kritik güvenlik alarmı bulunmuyor.</i>\n`;
+      }
+
+      await sendTelegramMessage(senderChatId, rep);
+    } catch (err: any) {
+      await sendTelegramMessage(senderChatId, `❌ YNetMon verisi alınamadı: ${err.message}`);
+    }
+    return;
+  }
+
+  // dns kapat, /dns kapat, adguard kapat, /adguard kapat
+  if (/^[/]?(?:dns|adguard)\s+(?:kapat|durdur|pause|stop)\b/i.test(text)) {
+    const rawDuration = text
+      .replace(/^[/]?(?:dns|adguard)\s+(?:kapat|durdur|pause|stop)[:\s]*/i, "")
+      .trim()
+      .toLowerCase();
+    let minutes = 10;
+
+    if (rawDuration) {
+      const matchHour = rawDuration.match(/^(\d+)\s*(?:h|s|saat)$/);
+      const matchMin = rawDuration.match(/^(\d+)\s*(?:m|dk|dakika)?$/);
+      if (matchHour) {
+        minutes = Number(matchHour[1]) * 60;
+      } else if (matchMin) {
+        minutes = Number(matchMin[1]);
+      }
+    }
+
+    const res = await setAdGuardProtection(false, minutes);
+    await sendTelegramMessage(senderChatId, res.message);
+    return;
+  }
+
+  // dns ac, /dns ac, adguard ac, /adguard ac
+  if (/^[/]?(?:dns|adguard)\s+(?:ac|aç|baslat|başlat|start|enable)\b/i.test(text)) {
+    const res = await setAdGuardProtection(true);
+    await sendTelegramMessage(senderChatId, res.message);
+    return;
+  }
+
+  // dns, /dns, adguard, /adguard
+  if (/^[/]?(?:dns|adguard)$/i.test(text)) {
+    try {
+      const stats = await getAdGuardStats();
+      if (!stats) {
+        await sendTelegramMessage(
+          senderChatId,
+          "⚠️ <b>AdGuard Home servisine ulaşılamadı.</b> Servis çalışmıyor veya port 8080 erişilemez."
+        );
+        return;
+      }
+
+      const statusIcon = stats.protection_enabled
+        ? "🟢 Aktif (Filtreleme Açık)"
+        : "🔴 Duraklatıldı (Filtreleme Kapalı)";
+      let rep = `🛡️ <b>AdGuard Home DNS ve Tehdit Raporu</b>\n\n`;
+      rep += `⚙️ <b>Durum:</b> ${statusIcon}\n`;
+      rep += `📊 <b>Son 24 Saatlik Sorgu:</b> ${stats.dns_queries_24h.toLocaleString("tr-TR")}\n`;
+      rep += `🚫 <b>Engellenen İstek:</b> ${stats.blocked_filtering_24h.toLocaleString("tr-TR")} <b>(%${stats.blocked_percentage})</b>\n`;
+
+      if (stats.top_blocked && stats.top_blocked.length > 0) {
+        rep += `\n🛑 <b>En Çok Engellenen Reklam/İzleyiciler:</b>\n`;
+        for (const b of stats.top_blocked) {
+          rep += `• <code>${escapeHtml(b.domain)}</code> (${b.count} istek)\n`;
+        }
+      }
+
+      rep += `\n💡 <i>10 dakika duraklatmak:</i> <code>/dns kapat 10m</code>\n`;
+      rep += `💡 <i>Tekrar açmak:</i> <code>/dns ac</code>`;
+
+      await sendTelegramMessage(senderChatId, rep);
+    } catch (err: any) {
+      await sendTelegramMessage(senderChatId, `❌ AdGuard verisi alınamadı: ${err.message}`);
     }
     return;
   }

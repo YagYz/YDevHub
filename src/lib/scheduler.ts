@@ -140,6 +140,52 @@ export async function checkTaskReminders(now: Date = new Date()): Promise<void> 
   }
 }
 
+import { findDockerSocket, fetchDockerContainers } from "./systemMonitor";
+
+const lastContainerStates: Map<string, string> = new Map();
+let isFirstContainerScan = true;
+
+export async function checkContainerHealth(): Promise<void> {
+  const { chatId, enabled } = getBotConfig();
+  if (!chatId || !enabled) return;
+
+  const socketPath = findDockerSocket();
+  if (!socketPath) return;
+
+  try {
+    const containers = await fetchDockerContainers(socketPath);
+    for (const c of containers) {
+      const name = c.names[0] || c.id;
+      const prevState = lastContainerStates.get(name);
+      const currState = c.state;
+
+      if (!isFirstContainerScan && prevState) {
+        if (prevState === "running" && currState !== "running") {
+          const alertMsg =
+            `🚨 <b>[ALARM] Konteyner Durdu!</b>\n\n` +
+            `🐳 <b>Konteyner:</b> <code>${name}</code>\n` +
+            `⚠️ <b>Yeni Durum:</b> <b>${currState}</b> (${escapeHtml(c.status)})\n\n` +
+            `🔄 <i>Yeniden başlatmak için:</i> <code>/restart ${name}</code>`;
+          await sendTelegramMessage(chatId, alertMsg);
+          console.warn(`[Scheduler] Konteyner çökme alarmı gönderildi: ${name} (${currState})`);
+        } else if (prevState !== "running" && currState === "running") {
+          const recoveredMsg =
+            `✅ <b>[SERVİS KURTARILDI]</b>\n\n` +
+            `🐳 <b>Konteyner:</b> <code>${name}</code>\n` +
+            `🟢 <b>Durum:</b> Yeniden aktif (${escapeHtml(c.status)})`;
+          await sendTelegramMessage(chatId, recoveredMsg);
+          console.log(`[Scheduler] Konteyner kurtarıldı bildirimi gönderildi: ${name}`);
+        }
+      }
+
+      lastContainerStates.set(name, currState);
+    }
+    isFirstContainerScan = false;
+  } catch {
+    // Docker socket read error, silently skip
+  }
+}
+
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
@@ -152,6 +198,7 @@ export async function runSchedulerCycle(): Promise<void> {
   const now = new Date();
   await checkMorningSummary(now);
   await checkTaskReminders(now);
+  await checkContainerHealth();
 }
 
 export function startScheduler(intervalMs = 60000): void {
