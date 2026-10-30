@@ -148,3 +148,79 @@ export async function getSystemStatus(): Promise<SystemStatus> {
     },
   };
 }
+
+export async function restartDockerContainer(
+  containerNameOrId: string
+): Promise<{ success: boolean; message: string; targetName?: string }> {
+  const socketPath = findDockerSocket();
+  if (!socketPath) {
+    return { success: false, message: "Docker socket bulunamadı." };
+  }
+
+  const query = containerNameOrId.trim().toLowerCase();
+  let targetId = query;
+  let targetDisplayName = query;
+
+  try {
+    const list = await fetchDockerContainers(socketPath);
+    const match = list.find((c) => {
+      const idMatch = c.id.toLowerCase().startsWith(query);
+      const nameMatch = c.names.some(
+        (n) => n.toLowerCase() === query || n.toLowerCase().includes(query)
+      );
+      return idMatch || nameMatch;
+    });
+
+    if (match) {
+      targetId = match.id;
+      targetDisplayName = match.names[0] || match.id;
+    }
+  } catch {
+    // continue with raw query
+  }
+
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        socketPath,
+        path: `/containers/${encodeURIComponent(targetId)}/restart?t=10`,
+        method: "POST",
+        headers: { Host: "localhost" },
+        timeout: 25000,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({
+              success: true,
+              message: `✅ <b>Konteyner Yeniden Başlatıldı:</b> <code>${targetDisplayName}</code>`,
+              targetName: targetDisplayName,
+            });
+          } else if (res.statusCode === 404) {
+            resolve({
+              success: false,
+              message: `❌ <code>${targetDisplayName}</code> adında aktif bir konteyner bulunamadı.`,
+            });
+          } else {
+            resolve({
+              success: false,
+              message: `❌ Hata (HTTP ${res.statusCode}): ${data || "Yeniden başlatılamadı"}`,
+            });
+          }
+        });
+      }
+    );
+
+    req.on("error", (err) =>
+      resolve({ success: false, message: `❌ Docker soket bağlantı hatası: ${err.message}` })
+    );
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ success: false, message: "⏱️ Yeniden başlatma işlemi zaman aşımına uğradı." });
+    });
+    req.end();
+  });
+}
+
