@@ -70,7 +70,7 @@ function renderInline(text: string, onImageClick?: (url: string) => void): React
       tokens.push(
         <code
           key={`code-${idx++}`}
-          className="px-1.5 py-0.5 rounded bg-zinc-800/90 text-amber-300 font-mono text-xs border border-zinc-700/60"
+          className="px-1.5 py-0.5 rounded-md bg-zinc-800 text-amber-300 font-mono text-xs sm:text-[13px] border border-zinc-700/80 font-medium"
         >
           {match[5]}
         </code>
@@ -78,7 +78,7 @@ function renderInline(text: string, onImageClick?: (url: string) => void): React
     } else if (match[6] !== undefined) {
       // Bold
       tokens.push(
-        <strong key={`bold-${idx++}`} className="font-semibold text-white">
+        <strong key={`bold-${idx++}`} className="font-bold text-white">
           {match[6]}
         </strong>
       );
@@ -160,7 +160,7 @@ export default function MarkdownViewer({
               )}
             </button>
           </div>
-          <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed">
+          <pre className="p-4 text-xs sm:text-sm font-mono text-emerald-300 overflow-x-auto leading-relaxed select-text">
             {codeString}
           </pre>
         </div>
@@ -179,7 +179,7 @@ export default function MarkdownViewer({
       elements.push(
         <h1
           key={`h1-${blockId++}`}
-          className="text-xl font-bold text-white border-b border-zinc-800 pb-2 mt-4 mb-3"
+          className="text-xl sm:text-2xl font-bold text-white border-b border-zinc-800/80 pb-2.5 mt-6 mb-3 tracking-tight"
         >
           {renderInline(line.slice(2), onImageClick)}
         </h1>
@@ -191,7 +191,7 @@ export default function MarkdownViewer({
       elements.push(
         <h2
           key={`h2-${blockId++}`}
-          className="text-base font-bold text-indigo-300 mt-4 mb-2"
+          className="text-lg sm:text-xl font-bold text-indigo-300 mt-5 mb-2.5 tracking-tight"
         >
           {renderInline(line.slice(3), onImageClick)}
         </h2>
@@ -203,7 +203,7 @@ export default function MarkdownViewer({
       elements.push(
         <h3
           key={`h3-${blockId++}`}
-          className="text-sm font-semibold text-zinc-100 mt-3 mb-1.5"
+          className="text-base sm:text-lg font-semibold text-zinc-100 mt-4 mb-2 tracking-tight"
         >
           {renderInline(line.slice(4), onImageClick)}
         </h3>
@@ -217,7 +217,7 @@ export default function MarkdownViewer({
       elements.push(
         <blockquote
           key={`bq-${blockId++}`}
-          className="border-l-2 border-indigo-500 bg-indigo-500/5 pl-3.5 py-2 my-2 text-xs text-zinc-300 rounded-r-lg"
+          className="border-l-4 border-indigo-500 bg-indigo-500/10 px-4 py-2.5 my-3 text-xs sm:text-sm text-zinc-200 rounded-r-xl leading-relaxed"
         >
           {renderInline(line.slice(2), onImageClick)}
         </blockquote>
@@ -233,7 +233,7 @@ export default function MarkdownViewer({
       elements.push(
         <div
           key={`chk-${blockId++}`}
-          className="flex items-center gap-2 text-sm my-1.5 text-zinc-200"
+          className="flex items-center gap-2.5 text-sm sm:text-base my-1.5 text-zinc-200"
         >
           {checked ? (
             <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -254,9 +254,9 @@ export default function MarkdownViewer({
       elements.push(
         <div
           key={`ul-${blockId++}`}
-          className="flex items-start gap-2 text-sm my-1 text-zinc-300 pl-1"
+          className="flex items-start gap-2.5 text-sm sm:text-base my-1.5 text-zinc-200 pl-1 leading-relaxed"
         >
-          <span className="text-indigo-400 mt-1">•</span>
+          <span className="text-indigo-400 mt-1.5 font-bold leading-none">•</span>
           <div className="flex-1">{renderInline(line.trim().slice(2), onImageClick)}</div>
         </div>
       );
@@ -266,12 +266,12 @@ export default function MarkdownViewer({
 
     // Paragraph
     elements.push(
-      <p key={`p-${blockId++}`} className="text-sm text-zinc-300 leading-relaxed my-2">
+      <p key={`p-${blockId++}`} className="text-sm sm:text-base text-zinc-200 leading-relaxed sm:leading-7 my-2.5 font-normal">
         {renderInline(line, onImageClick)}
       </p>
     );
     i++;
   }
 
-  return <div className="space-y-1">{elements}</div>;
+  return <div className="space-y-1 text-zinc-200 select-text leading-relaxed">{elements}</div>;
 }

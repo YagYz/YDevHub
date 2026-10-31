@@ -42,6 +42,7 @@ import {
   Calendar,
   Smartphone,
   ChevronDown,
+  Menu,
 } from "lucide-react";
 import MarkdownViewer from "@/components/MarkdownViewer";
 import DailyNotesPanel from "@/components/DailyNotesPanel";
@@ -158,6 +159,11 @@ export default function YDevHubPage() {
   const [activeTab, setActiveTab] = useState<
     "daily" | "dashboard" | "kanban" | "notes" | "commands" | "vault" | "system"
   >("daily");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileKanbanTab, setMobileKanbanTab] = useState<
+    "todo" | "in_progress" | "review" | "done" | "all"
+  >("todo");
+  const [mobileNoteView, setMobileNoteView] = useState<"list" | "detail">("list");
   const [selectedProjectId, setSelectedProjectId] = useState<number | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -807,9 +813,22 @@ export default function YDevHubPage() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
-      {/* LEFT SIDEBAR */}
-      <aside className="w-72 border-r border-zinc-800/80 bg-zinc-950/90 flex flex-col justify-between shrink-0">
-        <div className="p-5 space-y-6 overflow-y-auto">
+      {/* MOBILE BACKDROP OVERLAY */}
+      {mobileMenuOpen && (
+        <div
+          onClick={() => setMobileMenuOpen(false)}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 lg:hidden transition-opacity"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* SIDEBAR (DESKTOP STATIC / MOBILE SLIDE-OVER DRAWER) */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-zinc-800/80 bg-zinc-950 flex flex-col justify-between shrink-0 transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 ${
+          mobileMenuOpen ? "translate-x-0 shadow-2xl shadow-black" : "-translate-x-full"
+        }`}
+      >
+        <div className="p-5 space-y-6 overflow-y-auto flex-1">
           {/* Brand Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -826,6 +845,15 @@ export default function YDevHubPage() {
                 <p className="text-xs text-zinc-400">Proje & Homelab Üssü</p>
               </div>
             </div>
+
+            {/* Mobile Close Button */}
+            <button
+              onClick={() => setMobileMenuOpen(false)}
+              className="lg:hidden p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900 border border-transparent hover:border-zinc-800 transition"
+              aria-label="Menüyü Kapat"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Main Navigation */}
@@ -835,7 +863,10 @@ export default function YDevHubPage() {
             </p>
 
             <button
-              onClick={() => setActiveTab("daily")}
+              onClick={() => {
+                setActiveTab("daily");
+                setMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 activeTab === "daily"
                   ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/30"
@@ -858,7 +889,10 @@ export default function YDevHubPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab("dashboard")}
+              onClick={() => {
+                setActiveTab("dashboard");
+                setMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 activeTab === "dashboard"
                   ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/30"
@@ -875,7 +909,10 @@ export default function YDevHubPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab("kanban")}
+              onClick={() => {
+                setActiveTab("kanban");
+                setMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 activeTab === "kanban"
                   ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/30"
@@ -892,7 +929,10 @@ export default function YDevHubPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab("notes")}
+              onClick={() => {
+                setActiveTab("notes");
+                setMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 activeTab === "notes"
                   ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/30"
@@ -909,7 +949,10 @@ export default function YDevHubPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab("commands")}
+              onClick={() => {
+                setActiveTab("commands");
+                setMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 activeTab === "commands"
                   ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/30"
@@ -926,7 +969,10 @@ export default function YDevHubPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab("vault")}
+              onClick={() => {
+                setActiveTab("vault");
+                setMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 activeTab === "vault"
                   ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/30"
@@ -943,7 +989,10 @@ export default function YDevHubPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab("system")}
+              onClick={() => {
+                setActiveTab("system");
+                setMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 activeTab === "system"
                   ? "bg-indigo-600/15 text-indigo-300 border border-indigo-500/30"
@@ -981,7 +1030,10 @@ export default function YDevHubPage() {
 
           <div className="flex items-center gap-1.5 pt-1">
             <button
-              onClick={() => setShowSecurityModal(true)}
+              onClick={() => {
+                setShowSecurityModal(true);
+                setMobileMenuOpen(false);
+              }}
               className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] text-zinc-300 transition"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
@@ -1000,12 +1052,21 @@ export default function YDevHubPage() {
       </aside>
 
       {/* MAIN CONTENT AREA */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* TOP BAR */}
-        <header className="h-16 border-b border-zinc-800/80 px-6 flex items-center justify-between gap-3 shrink-0 bg-zinc-950/80 backdrop-blur-md">
-          {/* Project Filter Dropdown in Top Bar */}
-          <div className="flex items-center gap-2">
-            <div className="relative">
+        <header className="h-16 border-b border-zinc-800/80 px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-3 shrink-0 bg-zinc-950/80 backdrop-blur-md">
+          {/* Mobile Hamburger Menu Toggle & Project Filter Dropdown */}
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="lg:hidden p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition shrink-0"
+              aria-label="Menüyü Aç"
+              title="Menüyü Aç"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            <div className="relative min-w-0">
               <select
                 value={selectedProjectId}
                 onChange={(e) =>
@@ -1013,7 +1074,7 @@ export default function YDevHubPage() {
                     e.target.value === "all" ? "all" : Number(e.target.value)
                   )
                 }
-                className="appearance-none bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 rounded-xl pl-3 pr-8 py-2 text-xs font-semibold text-white cursor-pointer focus:outline-none focus:border-indigo-500/60 transition shadow-sm"
+                className="appearance-none bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 rounded-xl pl-2.5 sm:pl-3 pr-7 sm:pr-8 py-2 text-xs font-semibold text-white cursor-pointer focus:outline-none focus:border-indigo-500/60 transition shadow-sm max-w-[140px] sm:max-w-none text-ellipsis"
               >
                 <option value="all">📁 Tüm Projeler ({projects.length})</option>
                 {projects.map((p) => (
@@ -1022,12 +1083,12 @@ export default function YDevHubPage() {
                   </option>
                 ))}
               </select>
-              <ChevronDown className="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <ChevronDown className="w-3.5 h-3.5 text-zinc-400 absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
             {selectedProjectId !== "all" && (
               <button
                 onClick={() => setSelectedProjectId("all")}
-                className="text-[11px] text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800"
+                className="text-[11px] text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800 shrink-0"
                 title="Filtreyi Temizle"
               >
                 ✕
@@ -1036,7 +1097,7 @@ export default function YDevHubPage() {
           </div>
 
           {/* Search Box */}
-          <div className="relative flex-1 max-w-sm hidden sm:block">
+          <div className="relative flex-1 max-w-sm hidden md:block">
             <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -1048,11 +1109,14 @@ export default function YDevHubPage() {
           </div>
 
           {/* Header Action Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Bot Status Pill */}
             <button
-              onClick={() => setActiveTab("system")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition ${
+              onClick={() => {
+                setActiveTab("system");
+                setMobileMenuOpen(false);
+              }}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-medium transition ${
                 botConfigured
                   ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20 hover:bg-emerald-500/20"
                   : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200"
@@ -1060,7 +1124,7 @@ export default function YDevHubPage() {
               title="Telegram Bot & Sistem Ayarlarına Git"
             >
               <Bot className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">
+              <span className="hidden sm:inline">
                 {botConfigured ? "Bot Aktif" : "Bot Bağla"}
               </span>
             </button>
@@ -1069,19 +1133,19 @@ export default function YDevHubPage() {
             <button
               onClick={() => checkServersHealth(projects)}
               disabled={checkingHealth}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium transition"
+              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium transition"
               title="Proje portlarını tara"
             >
               <Activity
                 className={`w-3.5 h-3.5 text-emerald-400 ${checkingHealth ? "animate-spin" : ""}`}
               />
-              <span className="hidden lg:inline">Port Tara</span>
+              <span>Port Tara</span>
             </button>
 
             {/* Quick Add Buttons */}
             <button
               onClick={openCreateProject}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition shadow-md shadow-indigo-600/20"
+              className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition shadow-md shadow-indigo-600/20"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Proje</span>
@@ -1095,7 +1159,7 @@ export default function YDevHubPage() {
                 });
                 setShowTaskModal(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium transition"
+              className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium transition"
             >
               <Plus className="w-3.5 h-3.5 text-emerald-400" />
               <span>Görev</span>
@@ -1104,8 +1168,8 @@ export default function YDevHubPage() {
         </header>
 
         {/* LIVE HOMELAB & PRODUCTIVITY MINI BAR */}
-        <div className="h-9 px-6 bg-zinc-950/90 border-b border-zinc-800/60 flex items-center justify-between text-xs overflow-x-auto gap-4 shrink-0 font-medium">
-          <div className="flex items-center gap-3">
+        <div className="h-9 px-3 sm:px-6 bg-zinc-950/90 border-b border-zinc-800/60 flex items-center justify-between text-xs overflow-x-auto gap-3 sm:gap-4 shrink-0 font-medium whitespace-nowrap">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             {/* Today's Pending Daily Notes */}
             <button
               onClick={() => setActiveTab("daily")}
@@ -1120,7 +1184,7 @@ export default function YDevHubPage() {
                     : "bg-zinc-800 text-zinc-400"
                 }`}
               >
-                {pendingDailyCount} bekleyen
+                {pendingDailyCount}
               </span>
             </button>
 
@@ -1132,7 +1196,7 @@ export default function YDevHubPage() {
               className="flex items-center gap-1.5 text-zinc-400 hover:text-white transition"
             >
               <Kanban className="w-3.5 h-3.5 text-amber-400" />
-              <span>Açık Görevler:</span>
+              <span>Görevler:</span>
               <span className="font-mono text-[11px] text-zinc-200">
                 {tasks.filter((t) => t.status !== "done").length}
               </span>
@@ -1146,14 +1210,14 @@ export default function YDevHubPage() {
               className="flex items-center gap-1.5 text-zinc-400 hover:text-white transition"
             >
               <FolderGit2 className="w-3.5 h-3.5 text-sky-400" />
-              <span>Aktif Projeler:</span>
+              <span>Projeler:</span>
               <span className="font-mono text-[11px] text-zinc-200">
                 {projects.filter((p) => p.status === "active").length}/{projects.length}
               </span>
             </button>
           </div>
 
-          <div className="flex items-center gap-3 text-zinc-400 font-mono text-[11px]">
+          <div className="flex items-center gap-2.5 sm:gap-3 text-zinc-400 font-mono text-[11px]">
             {/* Quick Bot Status */}
             <button
               onClick={() => setActiveTab("system")}
@@ -1178,7 +1242,7 @@ export default function YDevHubPage() {
         </div>
 
         {/* SCROLLABLE VIEWPORT */}
-        <main className="flex-1 overflow-y-auto p-6 space-y-6">
+        <main className="flex-1 overflow-y-auto p-3.5 sm:p-6 space-y-4 sm:space-y-6">
           {/* STATS STRIP */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex items-center justify-between">
@@ -1486,14 +1550,51 @@ export default function YDevHubPage() {
 
           {/* TAB 2: KANBAN TASK BOARD */}
           {activeTab === "kanban" && (
-            <div className="space-y-5">
+            <div className="space-y-4 sm:space-y-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-white">Kanban Görev Panosu</h2>
+                  <h2 className="text-base sm:text-lg font-semibold text-white">Kanban Görev Panosu</h2>
                   <p className="text-xs text-zinc-400">
                     Projelerdeki yapılacakları, devam eden geliştirmeleri ve tamamlanan işleri yönet
                   </p>
                 </div>
+              </div>
+
+              {/* Mobile Column Tabs Bar */}
+              <div className="flex md:hidden items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                {(
+                  [
+                    { key: "todo", title: "To-Do", dot: "bg-zinc-400" },
+                    { key: "in_progress", title: "Geliştiriliyor", dot: "bg-amber-400" },
+                    { key: "review", title: "Test", dot: "bg-sky-400" },
+                    { key: "done", title: "Tamamlandı", dot: "bg-emerald-400" },
+                    { key: "all", title: "Tümü", dot: "bg-indigo-400" },
+                  ] as const
+                ).map((ct) => {
+                  const count =
+                    ct.key === "all"
+                      ? filteredTasks.length
+                      : filteredTasks.filter((t) => t.status === ct.key).length;
+                  const isActive = mobileKanbanTab === ct.key;
+                  return (
+                    <button
+                      key={ct.key}
+                      type="button"
+                      onClick={() => setMobileKanbanTab(ct.key)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl whitespace-nowrap font-medium transition border ${
+                        isActive
+                          ? "bg-zinc-800 text-white border-zinc-700 shadow-sm"
+                          : "bg-zinc-950 text-zinc-400 hover:text-zinc-200 border-zinc-900"
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${ct.dot}`} />
+                      <span>{ct.title}</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300">
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1506,10 +1607,14 @@ export default function YDevHubPage() {
                   ] as const
                 ).map((col) => {
                   const colTasks = filteredTasks.filter((t) => t.status === col.key);
+                  const isVisibleOnMobile =
+                    mobileKanbanTab === "all" || mobileKanbanTab === col.key;
                   return (
                     <div
                       key={col.key}
-                      className="rounded-2xl bg-zinc-900/40 border border-zinc-800/80 p-4 flex flex-col gap-3 min-h-[480px]"
+                      className={`${
+                        isVisibleOnMobile ? "flex" : "hidden md:flex"
+                      } rounded-2xl bg-zinc-900/40 border border-zinc-800/80 p-3.5 sm:p-4 flex-col gap-3 min-h-[400px]`}
                     >
                       <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
                         <div className="flex items-center gap-2">
@@ -1585,13 +1690,20 @@ export default function YDevHubPage() {
 
           {/* TAB 3: VISUAL NOTES & MARKDOWN WIKI */}
           {activeTab === "notes" && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-220px)]">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 min-h-[520px] lg:h-[calc(100vh-220px)]">
               {/* Note List */}
-              <div className="lg:col-span-3 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col overflow-hidden">
-                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+              <div
+                className={`${
+                  mobileNoteView === "list" ? "flex" : "hidden lg:flex"
+                } lg:col-span-3 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex-col overflow-hidden max-h-[75vh] lg:max-h-none`}
+              >
+                <div className="p-3.5 sm:p-4 border-b border-zinc-800 flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-white">Notlar & .md Dokümanlar</h3>
                   <button
-                    onClick={handleCreateNewNote}
+                    onClick={() => {
+                      handleCreateNewNote();
+                      setMobileNoteView("detail");
+                    }}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition"
                   >
                     <Plus className="w-3.5 h-3.5" /> Yeni
@@ -1602,8 +1714,12 @@ export default function YDevHubPage() {
                   {filteredNotes.map((n) => (
                     <div
                       key={n.id}
-                      onClick={() => selectNoteForEdit(n)}
-                      className={`p-4 cursor-pointer transition ${
+                      onClick={() => {
+                        selectNoteForEdit(n);
+                        setNoteViewMode("preview");
+                        setMobileNoteView("detail");
+                      }}
+                      className={`p-3.5 sm:p-4 cursor-pointer transition ${
                         selectedNote?.id === n.id
                           ? "bg-indigo-600/10 border-l-2 border-indigo-500"
                           : "hover:bg-zinc-900"
@@ -1625,15 +1741,28 @@ export default function YDevHubPage() {
               </div>
 
               {/* Visual Markdown Split Editor & Reader */}
-              <div className="lg:col-span-9 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col overflow-hidden">
+              <div
+                className={`${
+                  mobileNoteView === "detail" ? "flex" : "hidden lg:flex"
+                } lg:col-span-9 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex-col overflow-hidden`}
+              >
                 {/* Editor Toolbar */}
-                <div className="p-3.5 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 bg-zinc-900/80">
+                <div className="p-3 sm:p-3.5 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 bg-zinc-900/80">
+                  {/* Mobile Back Button */}
+                  <button
+                    type="button"
+                    onClick={() => setMobileNoteView("list")}
+                    className="lg:hidden flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium transition"
+                  >
+                    ◀ Not Listesi
+                  </button>
+
                   <input
                     type="text"
                     value={noteTitle}
                     onChange={(e) => setNoteTitle(e.target.value)}
                     placeholder="Not / Doküman Başlığı..."
-                    className="bg-transparent text-base font-semibold text-white focus:outline-none flex-1 min-w-[180px]"
+                    className="bg-transparent text-sm sm:text-base font-semibold text-white focus:outline-none flex-1 min-w-[150px]"
                   />
 
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -1904,8 +2033,9 @@ export default function YDevHubPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800/80 overflow-hidden">
-                <table className="w-full text-left border-collapse">
+              {/* Desktop Configs Table */}
+              <div className="hidden md:block rounded-2xl bg-zinc-900/50 border border-zinc-800/80 overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[640px]">
                   <thead>
                     <tr className="border-b border-zinc-800 text-[11px] font-semibold uppercase text-zinc-400 bg-zinc-900/80">
                       <th className="py-3.5 px-4">Proje</th>
@@ -1979,6 +2109,78 @@ export default function YDevHubPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Mobile Cards for Configs */}
+              <div className="md:hidden space-y-3">
+                {filteredConfigs.map((cfg) => {
+                  const isShown = !cfg.is_secret || visibleSecrets[cfg.id];
+                  return (
+                    <div
+                      key={cfg.id}
+                      className="p-3.5 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-indigo-400">
+                          {getProjectName(cfg.project_id)}
+                        </span>
+                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                          {cfg.environment}
+                        </span>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-zinc-300 font-medium">{cfg.label}</p>
+                        <p className="text-xs font-mono font-semibold text-amber-300 mt-0.5 select-all">
+                          {cfg.key_name}
+                        </p>
+                      </div>
+
+                      {/* Value Box */}
+                      <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-zinc-950 border border-zinc-800/80">
+                        <span className="font-mono text-xs text-zinc-200 truncate flex-1 select-all">
+                          {isShown ? cfg.value_content : "••••••••••••••••••••••••"}
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {cfg.is_secret && (
+                            <button
+                              onClick={() =>
+                                setVisibleSecrets((prev) => ({
+                                  ...prev,
+                                  [cfg.id]: !prev[cfg.id],
+                                }))
+                              }
+                              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
+                              title="Göster/Gizle"
+                            >
+                              {isShown ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => copyToClipboard(cfg.value_content, `cfg-${cfg.id}`)}
+                            className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition"
+                            title="Kopyala"
+                          >
+                            {copiedKey === `cfg-${cfg.id}` ? (
+                              <Check className="w-4 h-4 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end pt-0.5">
+                        <button
+                          onClick={() => apiCall("config", "delete", { id: cfg.id })}
+                          className="text-xs text-rose-400/80 hover:text-rose-300 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-rose-500/10 transition"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Sil
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
