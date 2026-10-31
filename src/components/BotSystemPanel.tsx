@@ -165,37 +165,36 @@ export default function BotSystemPanel({
   return (
     <div className="space-y-6 max-w-5xl">
       {/* CARD 1: TELEGRAM BOT & NOTIFICATION ENGINE */}
-      <div className="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-4">
+      <div className="p-4 sm:p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-3 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
-              <Bot className="w-6 h-6" />
+            <div className="p-2.5 sm:p-3 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 shrink-0">
+              <Bot className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                Telegram Asistan & Otomasyon Botu
+              <h2 className="text-sm sm:text-base font-bold text-white flex flex-wrap items-center gap-2">
+                <span>Telegram Asistan Botu</span>
                 {botConfig.configured ? (
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  <span className="text-[10px] sm:text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                     🟢 Aktif
                   </span>
                 ) : (
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
+                  <span className="text-[10px] sm:text-[11px] font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
                     ⚪ Yapılandırılmadı
                   </span>
                 )}
               </h2>
               <p className="text-xs text-zinc-400">
-                Uzaktan not ekleme, görev açma, her sabah günlük özet ve 1 saat kala hatırlatma
-                mesajları.
+                Uzaktan not ekleme, görev açma, her sabah günlük özet ve hatırlatmalar.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto shrink-0">
             <button
               onClick={handleSendTestMessage}
               disabled={testSending || !botConfig.configured}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:pointer-events-none text-xs font-medium text-white transition border border-zinc-700/60"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:pointer-events-none text-xs font-medium text-white transition border border-zinc-700/60"
             >
               <Send className="w-3.5 h-3.5 text-sky-400" />
               {testSending ? "Gönderiliyor..." : "Test Mesajı Gönder"}
@@ -203,7 +202,7 @@ export default function BotSystemPanel({
             <button
               onClick={handleTriggerMorningSummary}
               disabled={!botConfig.configured}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 disabled:opacity-40 disabled:pointer-events-none text-xs font-medium text-indigo-300 transition border border-indigo-500/30"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 disabled:opacity-40 disabled:pointer-events-none text-xs font-medium text-indigo-300 transition border border-indigo-500/30"
             >
               <Clock className="w-3.5 h-3.5" />
               Sabah Özetini Tetikle
@@ -297,7 +296,7 @@ export default function BotSystemPanel({
       </div>
 
       {/* CARD 2: LIVE HOMELAB & DOCKER PROCESSES */}
-      <div className="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-5">
+      <div className="p-4 sm:p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-5">
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div className="flex items-center gap-2.5">
             <Cpu className="w-5 h-5 text-emerald-400" />
@@ -425,10 +424,10 @@ export default function BotSystemPanel({
       </div>
 
       {/* CARD 3: DNS & DATA CONFIGURATION */}
-      <div className="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-4">
-        <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+      <div className="p-4 sm:p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800 pb-3 gap-2.5">
           <div className="flex items-center gap-2.5">
-            <Server className="w-5 h-5 text-indigo-400" />
+            <Server className="w-5 h-5 text-indigo-400 shrink-0" />
             <h3 className="text-sm font-semibold text-white">
               AdGuard Home DNS & Sunucu Depolama Ayarları
             </h3>
