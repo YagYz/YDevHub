@@ -1,0 +1,327 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# ⚡ ydev — YDevHub REST API Komut Satırı İstemcisi
+# ==============================================================================
+set -e
+
+CONFIG_FILE="${HOME}/.config/ydevhub/config.json"
+DEFAULT_URL="http://10.10.50.1:3080"
+DEFAULT_KEY="ydh_ed604d18a7a0ebf0c03865c47499206bcdf0c83d"
+
+# Read config from file or environment
+if [ -f "$CONFIG_FILE" ]; then
+  API_URL=$(jq -r '.api_url // empty' "$CONFIG_FILE" 2>/dev/null || true)
+  API_KEY=$(jq -r '.api_key // empty' "$CONFIG_FILE" 2>/dev/null || true)
+fi
+
+API_URL="${YDEVHUB_API_URL:-${API_URL:-$DEFAULT_URL}}"
+API_KEY="${YDEVHUB_API_KEY:-${API_KEY:-$DEFAULT_KEY}}"
+
+# Colors
+C_RESET="\033[0m"
+C_BOLD="\033[1m"
+C_GREEN="\033[32m"
+C_BLUE="\033[34m"
+C_YELLOW="\033[33m"
+C_CYAN="\033[36m"
+C_RED="\033[31m"
+C_GRAY="\033[90m"
+
+function show_help() {
+  echo -e "${C_BOLD}⚡ YDevHub CLI (${API_URL})${C_RESET}"
+  echo ""
+  echo "Kullanım:"
+  echo "  ydev note <içerik> [-p low|med|high] [--due HH:MM] [--date YYYY-MM-DD]  (Not ekle)"
+  echo "  ydev notes [--limit N] [--date YYYY-MM-DD] [--all]                      (Notları listele)"
+  echo "  ydev note-done <id>                                                    (Notu tamamla)"
+  echo ""
+  echo "  ydev task <başlık> [-d <açıklama>] [-p low|med|high] [--due YYYY-MM-DD] (Görev ekle)"
+  echo "  ydev tasks [--status todo|in_progress|done] [--limit N]                (Görevleri listele)"
+  echo "  ydev task-done <id>                                                    (Görevi tamamla)"
+  echo ""
+  echo "  ydev quick <metin>                                                     (Otomatik not/görev ayrıştır)"
+  echo "  ydev status                                                            (API & Sunucu bağlantısını test et)"
+  echo "  ydev config                                                            (Mevcut ayarları göster)"
+  echo ""
+  echo "Aliaslar: not, notlar, gorev, gorevler, q"
+}
+
+function req() {
+  local method="$1"
+  local endpoint="$2"
+  local body="$3"
+
+  local curl_args=(
+    -s
+    -X "$method"
+    "${API_URL}${endpoint}"
+    -H "X-API-Key: ${API_KEY}"
+    -H "Content-Type: application/json"
+    --connect-timeout 4
+    --max-time 10
+  )
+
+  if [ -n "$body" ]; then
+    curl_args+=(-d "$body")
+  fi
+
+  local resp
+  resp=$(curl "${curl_args[@]}" 2>/dev/null || true)
+  if [ -z "$resp" ]; then
+    echo -e "${C_RED}❌ Hata: YDevHub sunucusuna erişilemedi (${API_URL})${C_RESET}" >&2
+    exit 1
+  fi
+  echo "$resp"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  note|not)
+    content=""
+    priority="medium"
+    due_time=""
+    date_val=""
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -p|--priority) priority="$2"; shift 2 ;;
+        --due) due_time="$2"; shift 2 ;;
+        --date) date_val="$2"; shift 2 ;;
+        *)
+          if [ -z "$content" ]; then
+            content="$1"
+          else
+            content="$content $1"
+          fi
+          shift
+          ;;
+      esac
+    done
+
+    if [ -z "$content" ]; then
+      echo -e "${C_RED}❌ Not içeriği belirtilmedi.${C_RESET}" >&2
+      exit 1
+    fi
+
+    payload=$(jq -n \
+      --arg c "$content" \
+      --arg p "$priority" \
+      --arg dt "$due_time" \
+      --arg d "$date_val" \
+      '{content: $c, priority: $p, due_time: $dt, date: (if $d != "" then $d else null end), source: "cli"}')
+
+    res=$(req POST "/api/v1/notes" "$payload")
+    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+      id=$(echo "$res" | jq -r '.note.id')
+      date=$(echo "$res" | jq -r '.note.date')
+      echo -e "${C_GREEN}✔ Not eklendi [#${id}]${C_RESET} ${C_GRAY}(${date})${C_RESET}"
+      echo -e "  ${content}"
+    else
+      err=$(echo "$res" | jq -r '.error // "Bilinmeyen hata"')
+      echo -e "${C_RED}❌ Not eklenemedi: ${err}${C_RESET}" >&2
+      exit 1
+    fi
+    ;;
+
+  notes|notlar)
+    limit=20
+    date_val=""
+    is_done=""
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -l|--limit) limit="$2"; shift 2 ;;
+        -d|--date) date_val="$2"; shift 2 ;;
+        --all) is_done=""; shift ;;
+        --pending) is_done="false"; shift ;;
+        --done) is_done="true"; shift ;;
+        *) shift ;;
+      esac
+    done
+
+    query="limit=${limit}"
+    if [ -n "$date_val" ]; then query="${query}&date=${date_val}"; fi
+    if [ -n "$is_done" ]; then query="${query}&is_done=${is_done}"; fi
+
+    res=$(req GET "/api/v1/notes?${query}")
+    if ! echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+      err=$(echo "$res" | jq -r '.error // "Bilinmeyen hata"')
+      echo -e "${C_RED}❌ Notlar alınamadı: ${err}${C_RESET}" >&2
+      exit 1
+    fi
+
+    count=$(echo "$res" | jq -r '.notes | length')
+    echo -e "${C_BOLD}📝 Günlük Notlar (${count} kayıt):${C_RESET}"
+    echo "$res" | jq -r '.notes[] | "[\(.id)] \(.date) \(if .is_done then "✔" else "○" end) [\(.priority)] \(.content)"' | while read -r line; do
+      if [[ "$line" =~ "✔" ]]; then
+        echo -e "${C_GRAY}${line}${C_RESET}"
+      else
+        echo -e "${C_CYAN}${line}${C_RESET}"
+      fi
+    done
+    ;;
+
+  note-done|not-yapildi)
+    id="$1"
+    if [ -z "$id" ]; then
+      echo -e "${C_RED}❌ Not ID belirtilmedi.${C_RESET}" >&2
+      exit 1
+    fi
+    res=$(req PATCH "/api/v1/notes" "{\"id\": $id, \"is_done\": true}")
+    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+      echo -e "${C_GREEN}✔ Not [#${id}] tamamlandı olarak işaretlendi.${C_RESET}"
+    else
+      echo -e "${C_RED}❌ Güncellenemedi.${C_RESET}" >&2
+      exit 1
+    fi
+    ;;
+
+  task|gorev)
+    title=""
+    desc=""
+    priority="medium"
+    due_date=""
+    project_id=""
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -d|--desc|--description) desc="$2"; shift 2 ;;
+        -p|--priority) priority="$2"; shift 2 ;;
+        --due) due_date="$2"; shift 2 ;;
+        --proj|--project) project_id="$2"; shift 2 ;;
+        *)
+          if [ -z "$title" ]; then
+            title="$1"
+          else
+            title="$title $1"
+          fi
+          shift
+          ;;
+      esac
+    done
+
+    if [ -z "$title" ]; then
+      echo -e "${C_RED}❌ Görev başlığı belirtilmedi.${C_RESET}" >&2
+      exit 1
+    fi
+
+    payload=$(jq -n \
+      --arg t "$title" \
+      --arg d "$desc" \
+      --arg p "$priority" \
+      --arg dd "$due_date" \
+      --arg pid "$project_id" \
+      '{title: $t, description: $d, priority: $p, due_date: $dd, project_id: (if $pid != "" then ($pid | tonumber) else null end)}')
+
+    res=$(req POST "/api/v1/tasks" "$payload")
+    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+      id=$(echo "$res" | jq -r '.task.id')
+      echo -e "${C_GREEN}✔ Görev eklendi [#${id}]${C_RESET} [${priority}]"
+      echo -e "  ${C_BOLD}${title}${C_RESET}"
+      if [ -n "$desc" ]; then
+        echo -e "  ${C_GRAY}${desc}${C_RESET}"
+      fi
+    else
+      err=$(echo "$res" | jq -r '.error // "Bilinmeyen hata"')
+      echo -e "${C_RED}❌ Görev eklenemedi: ${err}${C_RESET}" >&2
+      exit 1
+    fi
+    ;;
+
+  tasks|gorevler)
+    status=""
+    limit=20
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -s|--status) status="$2"; shift 2 ;;
+        -l|--limit) limit="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+
+    query="limit=${limit}"
+    if [ -n "$status" ]; then query="${query}&status=${status}"; fi
+
+    res=$(req GET "/api/v1/tasks?${query}")
+    if ! echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+      err=$(echo "$res" | jq -r '.error // "Bilinmeyen hata"')
+      echo -e "${C_RED}❌ Görevler alınamadı: ${err}${C_RESET}" >&2
+      exit 1
+    fi
+
+    count=$(echo "$res" | jq -r '.tasks | length')
+    echo -e "${C_BOLD}📋 Görev Listesi (${count} kayıt):${C_RESET}"
+    echo "$res" | jq -r '.tasks[] | "[\(.id)] [\(.status)] [\(.priority)] \(.title)"' | while read -r line; do
+      if [[ "$line" =~ "[done]" ]]; then
+        echo -e "${C_GRAY}${line}${C_RESET}"
+      elif [[ "$line" =~ "[in_progress]" ]]; then
+        echo -e "${C_YELLOW}${line}${C_RESET}"
+      else
+        echo -e "${C_CYAN}${line}${C_RESET}"
+      fi
+    done
+    ;;
+
+  task-done|gorev-yapildi)
+    id="$1"
+    if [ -z "$id" ]; then
+      echo -e "${C_RED}❌ Görev ID belirtilmedi.${C_RESET}" >&2
+      exit 1
+    fi
+    res=$(req PATCH "/api/v1/tasks" "{\"id\": $id, \"status\": \"done\"}")
+    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+      echo -e "${C_GREEN}✔ Görev [#${id}] tamamlandı olarak güncellendi.${C_RESET}"
+    else
+      echo -e "${C_RED}❌ Güncellenemedi.${C_RESET}" >&2
+      exit 1
+    fi
+    ;;
+
+  quick|q)
+    text="$*"
+    if [ -z "$text" ]; then
+      echo -e "${C_RED}❌ Metin belirtilmedi.${C_RESET}" >&2
+      exit 1
+    fi
+    payload=$(jq -n --arg t "$text" '{text: $t}')
+    res=$(req POST "/api/v1/quick" "$payload")
+    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+      type=$(echo "$res" | jq -r '.type')
+      id=$(echo "$res" | jq -r '.data.id')
+      echo -e "${C_GREEN}✔ Hızlı kayıt (${type}) eklendi [#${id}]${C_RESET}"
+    else
+      echo -e "${C_RED}❌ Eklenemedi.${C_RESET}" >&2
+      exit 1
+    fi
+    ;;
+
+  status|ping)
+    start_time=$(date +%s%3N 2>/dev/null || date +%s)
+    res=$(req GET "/api/v1/notes?limit=1")
+    end_time=$(date +%s%3N 2>/dev/null || date +%s)
+    diff=$(( end_time - start_time ))
+    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+      echo -e "${C_GREEN}✔ YDevHub REST API Aktif & Sağlıklı!${C_RESET}"
+      echo -e "  URL:     ${API_URL}"
+      echo -e "  Gecikme: ~${diff} ms"
+      echo -e "  Auth:    Geçerli X-API-Key"
+    else
+      echo -e "${C_RED}❌ API yanıt vermedi veya yetkilendirme hatası.${C_RESET}" >&2
+      exit 1
+    fi
+    ;;
+
+  config)
+    echo -e "${C_BOLD}⚙️  YDevHub CLI Yapılandırması:${C_RESET}"
+    echo "  Config Dosyası: ${CONFIG_FILE}"
+    echo "  API URL:        ${API_URL}"
+    echo "  API Key:        ${API_KEY:0:10}****************"
+    ;;
+
+  *)
+    show_help
+    ;;
+esac

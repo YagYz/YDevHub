@@ -5,8 +5,11 @@ import {
   getUploadsDir,
   SESSION_COOKIE_NAME,
   verifySessionToken,
+  getApiKey,
+  setApiKey,
 } from "@/lib/db";
 import fs from "fs";
+import crypto from "crypto";
 
 function getSystemConfig(db: any) {
   const rows = db.prepare("SELECT key, value FROM settings").all() as Array<{
@@ -49,6 +52,7 @@ function getSystemConfig(db: any) {
     watchtowerInterval: Number(
       map.cfg_watchtower_interval || process.env.WATCHTOWER_POLL_INTERVAL || 60
     ),
+    apiKey: getApiKey(),
     dbSizeKb,
     uploadedFilesCount,
   };
@@ -116,37 +120,52 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { entity, action, payload } = body;
 
-    if (entity === "system_config" && action === "update") {
-      const upsert = db.prepare(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
-      );
-      if (payload.appPort !== undefined)
-        upsert.run("cfg_app_port", String(payload.appPort).trim());
-      if (payload.hostDataDir !== undefined)
-        upsert.run("cfg_host_data_dir", String(payload.hostDataDir).trim());
-      if (payload.localDomain !== undefined)
-        upsert.run("cfg_local_domain", String(payload.localDomain).trim());
-      if (payload.secondaryLocalDomain !== undefined)
-        upsert.run(
-          "cfg_secondary_local_domain",
-          String(payload.secondaryLocalDomain).trim()
+    if (entity === "system_config") {
+      if (action === "update") {
+        const upsert = db.prepare(
+          "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
         );
-      if (payload.publicDomain !== undefined)
-        upsert.run("cfg_public_domain", String(payload.publicDomain).trim());
-      if (payload.dnsServerIp !== undefined)
-        upsert.run("cfg_dns_server_ip", String(payload.dnsServerIp).trim());
-      if (payload.maxUploadMb !== undefined)
-        upsert.run("cfg_max_upload_mb", String(Number(payload.maxUploadMb) || 8));
-      if (payload.watchtowerInterval !== undefined)
-        upsert.run(
-          "cfg_watchtower_interval",
-          String(Number(payload.watchtowerInterval) || 60)
-        );
+        if (payload.appPort !== undefined)
+          upsert.run("cfg_app_port", String(payload.appPort).trim());
+        if (payload.hostDataDir !== undefined)
+          upsert.run("cfg_host_data_dir", String(payload.hostDataDir).trim());
+        if (payload.localDomain !== undefined)
+          upsert.run("cfg_local_domain", String(payload.localDomain).trim());
+        if (payload.secondaryLocalDomain !== undefined)
+          upsert.run(
+            "cfg_secondary_local_domain",
+            String(payload.secondaryLocalDomain).trim()
+          );
+        if (payload.publicDomain !== undefined)
+          upsert.run("cfg_public_domain", String(payload.publicDomain).trim());
+        if (payload.dnsServerIp !== undefined)
+          upsert.run("cfg_dns_server_ip", String(payload.dnsServerIp).trim());
+        if (payload.maxUploadMb !== undefined)
+          upsert.run("cfg_max_upload_mb", String(Number(payload.maxUploadMb) || 8));
+        if (payload.watchtowerInterval !== undefined)
+          upsert.run(
+            "cfg_watchtower_interval",
+            String(Number(payload.watchtowerInterval) || 60)
+          );
+        if (payload.apiKey !== undefined && String(payload.apiKey).trim()) {
+          setApiKey(String(payload.apiKey).trim());
+        }
 
-      return NextResponse.json({
-        success: true,
-        systemConfig: getSystemConfig(db),
-      });
+        return NextResponse.json({
+          success: true,
+          systemConfig: getSystemConfig(db),
+        });
+      }
+
+      if (action === "regenerate_api_key") {
+        const newKey = "ydh_" + crypto.randomBytes(24).toString("hex");
+        setApiKey(newKey);
+        return NextResponse.json({
+          success: true,
+          apiKey: newKey,
+          systemConfig: getSystemConfig(db),
+        });
+      }
     }
 
     if (entity === "project") {
