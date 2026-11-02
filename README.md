@@ -82,6 +82,46 @@ Featuring a native **two-way Telegram Bot gateway**, YDevHub enables remote voic
 
 ---
 
+### ⚡ REST API & CLI Integration (`ydev`)
+
+YDevHub provides lightweight REST API endpoints secured via `X-API-Key` headers, enabling AI coding agents (Antigravity/AGY) and developer workstations to capture notes and manage tasks without SSH or direct database access.
+
+#### API Endpoints
+- `GET /api/v1/notes` — List daily notes (filters: `date`, `is_done`, `search`, `limit`).
+- `POST /api/v1/notes` — Create a note (`content`, `priority`, `date`, `due_time`, `source`).
+- `PATCH /api/v1/notes` — Update or toggle note completion (`id`, `is_done`, `content`).
+- `DELETE /api/v1/notes?id=<id>` — Delete a note.
+- `GET /api/v1/tasks` — List tasks (filters: `status`, `project_id`, `priority`, `limit`).
+- `POST /api/v1/tasks` — Create a task (`title`, `description`, `priority`, `due_date`, `due_time`).
+- `PATCH /api/v1/tasks` — Update task (`id`, `status`, `title`, `description`).
+- `DELETE /api/v1/tasks?id=<id>` — Delete a task.
+- `POST /api/v1/quick` — Universal quick capture (`text`, auto-detects `!task` vs note).
+
+#### CLI Tool (`scripts/ydev`)
+The repository includes a ready-to-use CLI script in `scripts/ydev`. Link it to your PATH:
+```bash
+ln -sf $(pwd)/scripts/ydev ~/.local/bin/ydev
+```
+
+**CLI Commands:**
+```bash
+# Notes
+ydev note "Meeting notes" -p high --due 14:00 --date 2026-11-05
+ydev notes [--pending | --done | --all]
+ydev note-done <id>
+
+# Tasks
+ydev task "Upgrade network switch" -d "Configure VLAN 50" -p high --due 2026-11-10
+ydev tasks [--status todo|in_progress|done]
+ydev task-done <id>
+
+# Quick & Status
+ydev quick "!task Server maintenance"
+ydev status
+```
+
+---
+
 ### 🛠️ Tech Stack
 
 | Layer | Technology |
@@ -174,6 +214,46 @@ Yerleşik **iki yönlü Telegram Bot köprüsü** sayesinde dışarıdayken hız
 | `/durum` | Yok | Anlık RAM, CPU yükü ve Docker konteyner durumları | `/durum` |
 | `/bugun` | Yok | Günün notları ve görevlerini ID'leriyle döker | `/bugun` |
 | `/yardim` | Yok | Komut yardım kartını listeler | `/yardim` |
+
+---
+
+### ⚡ REST API ve Komut Satırı Aracı (`ydev`)
+
+YDevHub, doğrudan SSH bağlantısı veya SQL çalıştırma zorunluluğunu ortadan kaldıran, `X-API-Key` korumalı hafif REST API uç noktaları ve geliştirici cihazları için yerel bir CLI aracı sunar.
+
+#### REST API Uç Noktaları
+- `GET /api/v1/notes` — Gündelik notları listeler (`date`, `is_done`, `search`, `limit`).
+- `POST /api/v1/notes` — Yeni not ekler (`content`, `priority`, `date`, `due_time`, `source`).
+- `PATCH /api/v1/notes` — Not durumunu/içeriğini günceller (`id`, `is_done`, `content`).
+- `DELETE /api/v1/notes?id=<id>` — Notu siler.
+- `GET /api/v1/tasks` — Görevleri listeler (`status`, `project_id`, `priority`, `limit`).
+- `POST /api/v1/tasks` — Yeni görev oluşturur (`title`, `description`, `priority`, `due_date`, `due_time`).
+- `PATCH /api/v1/tasks` — Görevi günceller (`id`, `status`, `title`, `priority`).
+- `DELETE /api/v1/tasks?id=<id>` — Görevi siler.
+- `POST /api/v1/quick` — Akıllı hızlı kayıt (`text` içinde `!task` veya `task:` varsa görev, yoksa not açar).
+
+#### Komut Satırı Aracı (`scripts/ydev`)
+Cihazınızda hızlıca kullanmak için scripti PATH yolunuza bağlayabilirsiniz:
+```bash
+ln -sf $(pwd)/scripts/ydev ~/.local/bin/ydev
+```
+
+**Kullanım Örnekleri:**
+```bash
+# Not İşlemleri
+ydev note "Akşam yedeklerini al" -p high --due 22:00
+ydev notes --pending
+ydev note-done <id>
+
+# Görev İşlemleri
+ydev task "Debian Çekirdek Güncellemesi" -d "LTS 6.1 testleri" -p high
+ydev tasks --status todo
+ydev task-done <id>
+
+# Hızlı Kayıt & Durum
+ydev quick "!task Güvenlik duvarı kurallarını yenile"
+ydev status
+```
 
 ---
 
