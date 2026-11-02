@@ -68,6 +68,51 @@ export function verifySessionToken(token?: string): boolean {
   return Boolean(session);
 }
 
+export function getApiKey(): string {
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'api_key'").get() as
+    | { value: string }
+    | undefined;
+
+  if (row?.value) {
+    return row.value;
+  }
+
+  const envKey = process.env.API_KEY?.trim();
+  const generatedKey = envKey || "ydh_" + crypto.randomBytes(24).toString("hex");
+
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_key', ?)").run(
+    generatedKey
+  );
+  return generatedKey;
+}
+
+export function setApiKey(newKey: string): void {
+  const db = getDb();
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_key', ?)").run(
+    newKey.trim()
+  );
+}
+
+export function verifyApiKeyCandidate(candidate?: string): boolean {
+  if (!candidate || typeof candidate !== "string") return false;
+  const validKey = getApiKey();
+  if (!validKey) return false;
+  const hashA = crypto.createHash("sha256").update(candidate.trim()).digest("hex");
+  const hashB = crypto.createHash("sha256").update(validKey.trim()).digest("hex");
+  return safeCompareHex(hashA, hashB);
+}
+
+export function verifyAuthOrApiKey(headers: Headers, sessionCookie?: string): boolean {
+  const apiKeyCandidate =
+    headers.get("x-api-key") ||
+    headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (apiKeyCandidate && verifyApiKeyCandidate(apiKeyCandidate)) {
+    return true;
+  }
+  return verifySessionToken(sessionCookie);
+}
+
 export function getDb(): DatabaseSync {
   if (!dbInstance) {
     dbInstance = new DatabaseSync(DB_PATH);
@@ -225,6 +270,15 @@ function initSchema(db: DatabaseSync) {
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('telegram_bot_enabled', '1')").run();
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('morning_summary_time', '08:30')").run();
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('morning_summary_last_date', '')").run();
+
+  // Initialize default API key for REST API & CLI integrations
+  const existingApiKey = db
+    .prepare("SELECT value FROM settings WHERE key = 'api_key'")
+    .get() as { value: string } | undefined;
+  if (!existingApiKey) {
+    const defaultApiKey = process.env.API_KEY?.trim() || "ydh_" + crypto.randomBytes(24).toString("hex");
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('api_key', ?)").run(defaultApiKey);
+  }
 
   // Seed default commands if commands table is empty
   const cmdCount = db.prepare("SELECT COUNT(*) as c FROM commands").get() as { c: number };

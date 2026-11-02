@@ -13,6 +13,8 @@ import {
   HardDrive,
   Clock,
   ShieldCheck,
+  Key,
+  Copy,
 } from "lucide-react";
 
 interface BotSystemPanelProps {
@@ -42,6 +44,7 @@ export default function BotSystemPanel({
   const [botSaving, setBotSaving] = useState(false);
   const [botMsg, setBotMsg] = useState("");
   const [testSending, setTestSending] = useState(false);
+  const [keyCopied, setKeyCopied] = useState(false);
 
   // System status state
   const [systemData, setSystemData] = useState<any>(null);
@@ -484,6 +487,72 @@ export default function BotSystemPanel({
             </div>
           </div>
         </form>
+      </div>
+
+      {/* CARD 4: REST API & CLI INTEGRATION KEY */}
+      <div className="p-4 sm:p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800 pb-3 gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <Key className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <h3 className="text-sm font-semibold text-white">
+                REST API & CLI Entegrasyon Anahtarı
+              </h3>
+              <p className="text-xs text-zinc-500">
+                Antigravity (AGY) ve terminalden SSH kullanmadan doğrudan not ve görev eklemek için kullanılır.
+              </p>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-amber-300 text-xs font-mono">
+            /api/v1/*
+          </span>
+        </div>
+
+        <div className="space-y-3 text-xs">
+          <div>
+            <label className="block text-zinc-400 font-medium mb-1">
+              Aktif API Anahtarı (X-API-Key)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                readOnly
+                value={sysConfig?.apiKey || ""}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-sm text-amber-300 font-mono tracking-wider"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (sysConfig?.apiKey) {
+                    navigator.clipboard.writeText(sysConfig.apiKey);
+                    setKeyCopied(true);
+                    setTimeout(() => setKeyCopied(false), 2000);
+                  }
+                }}
+                className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition shrink-0"
+              >
+                {keyCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                {keyCopied ? "Kopyalandı" : "Kopyala"}
+              </button>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800/80 font-mono text-[11px] text-zinc-400 overflow-x-auto space-y-1">
+            <div className="text-zinc-500">// Örnek Hızlı Not Ekleme (cURL / HTTP):</div>
+            <div className="text-emerald-400">
+              curl -X POST http://10.10.50.1:3080/api/v1/notes \
+            </div>
+            <div className="pl-4 text-zinc-300">
+              -H &quot;X-API-Key: {sysConfig?.apiKey || "ANAHTAR"}&quot; \
+            </div>
+            <div className="pl-4 text-zinc-300">
+              -H &quot;Content-Type: application/json&quot; \
+            </div>
+            <div className="pl-4 text-zinc-300">
+              -d &apos;&#123;&quot;content&quot;: &quot;Yeni not&quot;, &quot;priority&quot;: &quot;medium&quot;&#125;&apos;
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

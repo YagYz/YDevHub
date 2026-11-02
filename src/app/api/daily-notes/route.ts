@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb, SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/db";
+import { getDb, SESSION_COOKIE_NAME, verifyAuthOrApiKey } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   try {
-    if (!verifySessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
+    if (!verifyAuthOrApiKey(req.headers, req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    if (!verifySessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
+    if (!verifyAuthOrApiKey(req.headers, req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    if (!verifySessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
+    if (!verifyAuthOrApiKey(req.headers, req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -116,7 +116,7 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    if (!verifySessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
+    if (!verifyAuthOrApiKey(req.headers, req.cookies.get(SESSION_COOKIE_NAME)?.value)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
