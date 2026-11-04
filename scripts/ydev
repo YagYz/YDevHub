@@ -299,7 +299,7 @@ for n in notes:
       echo -e "${C_RED}❌ Hata: Not ID belirtilmedi.${C_RESET}" >&2
       exit 1
     fi
-    res=$(req POST "/api/v1/notes" "{\"action\":\"done\",\"id\":${id}}")
+    res=$(req PATCH "/api/v1/notes" "{\"id\":${id},\"is_done\":true}")
     if echo "$res" | grep -q '"success":true'; then
       echo -e "${C_GREEN}✔ Not [#${id}] tamamlandı olarak işaretlendi.${C_RESET}"
     else
