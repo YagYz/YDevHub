@@ -53,6 +53,7 @@ function getSystemConfig(db: any) {
       map.cfg_watchtower_interval || process.env.WATCHTOWER_POLL_INTERVAL || 60
     ),
     apiKey: getApiKey(),
+    ynetmonConfigured: Boolean(map.ynetmon_api_key && map.ynetmon_api_key.trim().length > 0),
     dbSizeKb,
     uploadedFilesCount,
   };
@@ -149,6 +150,15 @@ export async function POST(req: NextRequest) {
           );
         if (payload.apiKey !== undefined && String(payload.apiKey).trim()) {
           setApiKey(String(payload.apiKey).trim());
+        }
+        if (payload.ynetmonApiKey !== undefined) {
+          const val = String(payload.ynetmonApiKey).trim();
+          if (val) {
+            upsert.run("ynetmon_api_key", val);
+          }
+        }
+        if (payload.ynetmonUrl !== undefined && String(payload.ynetmonUrl).trim()) {
+          upsert.run("ynetmon_url", String(payload.ynetmonUrl).trim());
         }
 
         return NextResponse.json({

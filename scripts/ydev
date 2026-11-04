@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# ⚡ ydev — YDevHub REST API Komut Satırı İstemcisi
+# ⚡ ydev — YDevHub & Homelab CLI İstemcisi
 # ==============================================================================
 set -e
 
 CONFIG_FILE="${HOME}/.config/ydevhub/config.json"
 DEFAULT_URL="http://10.10.50.1:3080"
 DEFAULT_KEY="ydh_ed604d18a7a0ebf0c03865c47499206bcdf0c83d"
+DEFAULT_YNETMON_URL="http://10.10.50.1:8765"
+DEFAULT_YNETMON_KEY="ynetmon_secret_hub_key_2026"
 
 # Read config from file or environment
 if [ -f "$CONFIG_FILE" ]; then
   API_URL=$(jq -r '.api_url // empty' "$CONFIG_FILE" 2>/dev/null || true)
   API_KEY=$(jq -r '.api_key // empty' "$CONFIG_FILE" 2>/dev/null || true)
+  YNETMON_URL=$(jq -r '.ynetmon_url // empty' "$CONFIG_FILE" 2>/dev/null || true)
+  YNETMON_KEY=$(jq -r '.ynetmon_key // empty' "$CONFIG_FILE" 2>/dev/null || true)
 fi
 
 API_URL="${YDEVHUB_API_URL:-${API_URL:-$DEFAULT_URL}}"
 API_KEY="${YDEVHUB_API_KEY:-${API_KEY:-$DEFAULT_KEY}}"
+YNETMON_URL="${YNETMON_URL:-${YNETMON_URL:-$DEFAULT_YNETMON_URL}}"
+YNETMON_KEY="${YNETMON_KEY:-${YNETMON_KEY:-$DEFAULT_YNETMON_KEY}}"
 
 # Colors
 C_RESET="\033[0m"
@@ -26,24 +32,45 @@ C_YELLOW="\033[33m"
 C_CYAN="\033[36m"
 C_RED="\033[31m"
 C_GRAY="\033[90m"
+C_MAGENTA="\033[35m"
 
 function show_help() {
-  echo -e "${C_BOLD}⚡ YDevHub CLI (${API_URL})${C_RESET}"
+  echo -e "${C_BOLD}⚡ YDevHub & Homelab CLI (${API_URL})${C_RESET}"
   echo ""
-  echo "Kullanım:"
-  echo "  ydev note <içerik> [-p low|med|high] [--due HH:MM] [--date YYYY-MM-DD]  (Not ekle)"
-  echo "  ydev notes [--limit N] [--date YYYY-MM-DD] [--all]                      (Notları listele)"
-  echo "  ydev note-done <id>                                                    (Notu tamamla)"
+  echo -e "${C_BOLD}KULLANIM:${C_RESET}"
+  echo "  ydev <komut> [seçenekler]"
   echo ""
-  echo "  ydev task <başlık> [-d <açıklama>] [-p low|med|high] [--due YYYY-MM-DD] (Görev ekle)"
-  echo "  ydev tasks [--status todo|in_progress|done] [--limit N]                (Görevleri listele)"
-  echo "  ydev task-done <id>                                                    (Görevi tamamla)"
+  echo -e "${C_BOLD}📝 NOT YÖNETİMİ:${C_RESET}"
+  echo "  ydev note <içerik> [-p low|med|high] [--due HH:MM] [--date YYYY-MM-DD]"
+  echo "       Not ekler (alias: not)"
+  echo "  ydev notes [--limit N] [--date YYYY-MM-DD] [--pending|--done|--all]"
+  echo "       Notları listeler (alias: notlar)"
+  echo "  ydev note-done <id>"
+  echo "       Notu tamamlandı olarak işaretler (alias: not-yapildi)"
   echo ""
-  echo "  ydev quick <metin>                                                     (Otomatik not/görev ayrıştır)"
-  echo "  ydev status                                                            (API & Sunucu bağlantısını test et)"
-  echo "  ydev config                                                            (Mevcut ayarları göster)"
+  echo -e "${C_BOLD}📋 GÖREV YÖNETİMİ:${C_RESET}"
+  echo "  ydev task <başlık> [-d <açıklama>] [-p low|med|high] [--due YYYY-MM-DD]"
+  echo "       Görev ekler (alias: gorev)"
+  echo "  ydev tasks [--status todo|in_progress|done] [--limit N]"
+  echo "       Görevleri listeler (alias: gorevler)"
+  echo "  ydev task-done <id>"
+  echo "       Görevi tamamlar (alias: gorev-yapildi)"
   echo ""
-  echo "Aliaslar: not, notlar, gorev, gorevler, q"
+  echo -e "${C_BOLD}🌐 AĞ & YNETMON (Canlı Ağ Analitiği):${C_RESET}"
+  echo "  ydev net | ynetmon"
+  echo "       Canlı bant genişliği, bağlantı ve ağ istatistikleri özeti"
+  echo "  ydev net-alerts | alerts [--limit N]"
+  echo "       Son güvenlik ve anomali uyarılarını listeler"
+  echo "  ydev net-devices | devices [--limit N] [--all]"
+  echo "       Ağdaki aktif ve çevrimdışı cihazları/konteynerleri listeler"
+  echo ""
+  echo -e "${C_BOLD}⚡ HIZLI İŞLEM & SİSTEM:${C_RESET}"
+  echo "  ydev quick <metin>"
+  echo "       Tarih/saat içeren doğal metinden otomatik not/görev ayrıştır (alias: q)"
+  echo "  ydev status | ping"
+  echo "       YDevHub ve YNetMon API bağlantılarını test eder"
+  echo "  ydev config"
+  echo "       Mevcut CLI bağlantı ve anahtar ayarlarını görüntüler"
 }
 
 function req() {
@@ -72,6 +99,44 @@ function req() {
     exit 1
   fi
   echo "$resp"
+}
+
+function ynetmon_req() {
+  local endpoint="$1"
+  local resp
+  resp=$(curl -s \
+    -X GET \
+    "${YNETMON_URL}${endpoint}" \
+    -H "X-API-Key: ${YNETMON_KEY}" \
+    -H "Content-Type: application/json" \
+    --connect-timeout 4 \
+    --max-time 10 2>/dev/null || true)
+
+  if [ -z "$resp" ]; then
+    echo -e "${C_RED}❌ Hata: YNetMon servisine erişilemedi (${YNETMON_URL})${C_RESET}" >&2
+    exit 1
+  fi
+  echo "$resp"
+}
+
+function format_bps() {
+  local bps="${1:-0}"
+  awk -v b="$bps" 'BEGIN {
+    if (b >= 1000000000) printf "%.2f Gbps", b / 1000000000;
+    else if (b >= 1000000) printf "%.2f Mbps", b / 1000000;
+    else if (b >= 1000) printf "%.1f Kbps", b / 1000;
+    else printf "%d bps", b;
+  }'
+}
+
+function format_bytes() {
+  local bytes="${1:-0}"
+  awk -v b="$bytes" 'BEGIN {
+    if (b >= 1073741824) printf "%.2f GB", b / 1073741824;
+    else if (b >= 1048576) printf "%.2f MB", b / 1048576;
+    else if (b >= 1024) printf "%.1f KB", b / 1024;
+    else printf "%d B", b;
+  }'
 }
 
 cmd="${1:-}"
@@ -298,6 +363,120 @@ case "$cmd" in
     fi
     ;;
 
+  net|ynetmon|network)
+    res=$(ynetmon_req "/api/v1/integration/summary")
+    rx_raw=$(echo "$res" | jq -r '.rx_bps // 0')
+    tx_raw=$(echo "$res" | jq -r '.tx_bps // 0')
+    rx_fmt=$(format_bps "$rx_raw")
+    tx_fmt=$(format_bps "$tx_raw")
+
+    active_conns=$(echo "$res" | jq -r '.active_connections // 0')
+    containers=$(echo "$res" | jq -r '.docker_containers // 0')
+    active_devs=$(echo "$res" | jq -r '.storage.active_devices_count // .storage.devices_count // 0')
+    total_devs=$(echo "$res" | jq -r '.storage.total_devices_count // 0')
+    alerts_count=$(echo "$res" | jq -r '.storage.alerts_count // 0')
+    db_size=$(echo "$res" | jq -r '.storage.db_size_mb // 0')
+    cap_mode=$(echo "$res" | jq -r '.capture_mode // "N/A"')
+
+    echo -e "${C_BOLD}🌐 YNetMon Ağ Durumu & Trafik Analizi${C_RESET} ${C_GRAY}(${YNETMON_URL})${C_RESET}"
+    echo -e "  İndirme (RX):    ${C_GREEN}${rx_fmt}${C_RESET}"
+    echo -e "  Yükleme (TX):    ${C_CYAN}${tx_fmt}${C_RESET}"
+    echo -e "  Aktif Bağlantı:  ${C_BOLD}${active_conns}${C_RESET}"
+    echo -e "  Cihazlar:        ${C_BOLD}${active_devs}${C_RESET} aktif / ${total_devs} toplam"
+    echo -e "  Konteynerler:    ${C_BLUE}${containers}${C_RESET} Docker izleniyor"
+    echo -e "  Yakalama Modu:   ${C_YELLOW}${cap_mode}${C_RESET}"
+    echo -e "  Veritabanı:      ${db_size} MB | ${alerts_count} Güvenlik Uyarısı"
+
+    recent_count=$(echo "$res" | jq -r '.recent_alerts | length // 0')
+    if [ "$recent_count" -gt 0 ]; then
+      echo ""
+      echo -e "  ${C_YELLOW}⚠️ Son Uyarılar:${C_RESET}"
+      echo "$res" | jq -r '.recent_alerts[0:3][] | "    • [\(.severity | ascii_upcase)] \(.rule_name): \(.message)"'
+    fi
+    ;;
+
+  net-alerts|alerts)
+    limit=10
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -l|--limit) limit="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+
+    res=$(ynetmon_req "/api/v1/integration/alerts?limit=${limit}")
+    count=$(echo "$res" | jq -r '.alerts | length // 0')
+    echo -e "${C_BOLD}🚨 YNetMon Güvenlik & Trafik Uyarıları (${count} kayıt):${C_RESET}"
+
+    if [ "$count" -eq 0 ]; then
+      echo -e "${C_GREEN}  Aktif uyarı bulunmuyor. Ağ temiz.${C_RESET}"
+    else
+      echo "$res" | jq -c '.alerts[]' | while read -r item; do
+        sev=$(echo "$item" | jq -r '.severity // "info"')
+        rule=$(echo "$item" | jq -r '.rule_name // "Uyarı"')
+        msg=$(echo "$item" | jq -r '.message // ""')
+        src=$(echo "$item" | jq -r '.src_ip // "-"')
+
+        if [ "$sev" = "high" ] || [ "$sev" = "critical" ]; then
+          prefix="${C_RED}[${sev^^}]${C_RESET}"
+        elif [ "$sev" = "medium" ]; then
+          prefix="${C_YELLOW}[${sev^^}]${C_RESET}"
+        else
+          prefix="${C_BLUE}[${sev^^}]${C_RESET}"
+        fi
+        echo -e "  ${prefix} ${C_BOLD}${rule}${C_RESET} (${src})"
+        echo -e "    ${C_GRAY}${msg}${C_RESET}"
+      done
+    fi
+    ;;
+
+  net-devices|devices)
+    show_all="false"
+    limit=20
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -l|--limit) limit="$2"; shift 2 ;;
+        --all) show_all="true"; shift ;;
+        *) shift ;;
+      esac
+    done
+
+    res=$(ynetmon_req "/api/v1/integration/devices")
+    active_count=$(echo "$res" | jq -r '.active_count // 0')
+    total_count=$(echo "$res" | jq -r '.count // 0')
+
+    echo -e "${C_BOLD}📱 YNetMon Ağ Cihazları (${active_count} aktif / ${total_count} toplam):${C_RESET}"
+
+    if [ "$show_all" = "true" ]; then
+      filter_expr=".devices[0:${limit}][]"
+    else
+      filter_expr="[.devices[] | select(.is_online == true)][0:${limit}][]"
+    fi
+
+    echo "$res" | jq -c "$filter_expr" | while read -r item; do
+      ip=$(echo "$item" | jq -r '.ip')
+      vendor=$(echo "$item" | jq -r '.vendor // "Bilinmeyen"')
+      dev_type=$(echo "$item" | jq -r '.device_type // "LAN"')
+      container=$(echo "$item" | jq -r '.container_name // ""')
+      online=$(echo "$item" | jq -r '.is_online')
+      total_b=$(echo "$item" | jq -r '.total_bytes // 0')
+      bytes_fmt=$(format_bytes "$total_b")
+
+      name_str="$vendor"
+      if [ -n "$container" ]; then
+        name_str="${container} (${vendor})"
+      fi
+
+      if [ "$online" = "true" ]; then
+        status_tag="${C_GREEN}● Aktif${C_RESET}"
+      else
+        status_tag="${C_GRAY}○ Çevrimdışı${C_RESET}"
+      fi
+
+      printf "  %-15s %-16b %-8b %-30s %10s\n" "$ip" "$status_tag" "[$dev_type]" "$name_str" "$bytes_fmt"
+    done
+    ;;
+
   status|ping)
     start_time=$(date +%s%3N 2>/dev/null || date +%s)
     res=$(req GET "/api/v1/notes?limit=1")
@@ -309,16 +488,31 @@ case "$cmd" in
       echo -e "  Gecikme: ~${diff} ms"
       echo -e "  Auth:    Geçerli X-API-Key"
     else
-      echo -e "${C_RED}❌ API yanıt vermedi veya yetkilendirme hatası.${C_RESET}" >&2
+      echo -e "${C_RED}❌ YDevHub API yanıt vermedi veya yetkilendirme hatası.${C_RESET}" >&2
       exit 1
+    fi
+
+    echo ""
+    ynet_res=$(curl -s -X GET "${YNETMON_URL}/api/v1/integration/summary" \
+      -H "X-API-Key: ${YNETMON_KEY}" \
+      --connect-timeout 2 --max-time 4 2>/dev/null || true)
+
+    if echo "$ynet_res" | jq -e '.service == "YNetMon"' >/dev/null 2>&1; then
+      echo -e "${C_GREEN}✔ YNetMon Entegrasyon API Aktif & Sağlıklı!${C_RESET}"
+      echo -e "  URL:     ${YNETMON_URL}"
+      echo -e "  Mod:     $(echo "$ynet_res" | jq -r '.capture_mode')"
+    else
+      echo -e "${C_YELLOW}⚠️  YNetMon servisine ulaşılamadı (${YNETMON_URL}).${C_RESET}"
     fi
     ;;
 
   config)
-    echo -e "${C_BOLD}⚙️  YDevHub CLI Yapılandırması:${C_RESET}"
+    echo -e "${C_BOLD}⚙️  YDevHub & Homelab CLI Yapılandırması:${C_RESET}"
     echo "  Config Dosyası: ${CONFIG_FILE}"
-    echo "  API URL:        ${API_URL}"
-    echo "  API Key:        ${API_KEY:0:10}****************"
+    echo "  YDevHub URL:    ${API_URL}"
+    echo "  YDevHub Key:    ${API_KEY:0:10}****************"
+    echo "  YNetMon URL:    ${YNETMON_URL}"
+    echo "  YNetMon Key:    ${YNETMON_KEY:0:10}****************"
     ;;
 
   *)
