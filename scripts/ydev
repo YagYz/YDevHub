@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # ⚡ ydev — YDevHub & Homelab CLI İstemcisi
+# Desteklenen Platformlar: Linux & macOS (Darwin)
+# Mimari: Kişisel Bilgisayar (Client) -> Uzak Sunucu REST API / Docker
 # ==============================================================================
 set -e
 
@@ -10,12 +12,76 @@ DEFAULT_KEY="ydh_ed604d18a7a0ebf0c03865c47499206bcdf0c83d"
 DEFAULT_YNETMON_URL="http://10.10.50.1:8765"
 DEFAULT_YNETMON_KEY="ynetmon_secret_hub_key_2026"
 
+# Python 3 / jq Hybrid JSON parser (Zero external dependencies on clean macOS/Linux)
+HAS_JQ="false"
+if command -v jq >/dev/null 2>&1; then
+  HAS_JQ="true"
+fi
+
+function parse_json() {
+  if [ "$HAS_JQ" = "true" ]; then
+    jq "$@"
+  else
+    python3 -c "
+import sys, json
+
+args = sys.argv[1:]
+raw = '-r' in args
+args = [a for a in args if a not in ('-r', '-e', '-c')]
+
+expr = args[0] if args else '.'
+try:
+    c = sys.stdin.read().strip()
+    data = json.loads(c) if c else None
+except Exception:
+    sys.exit(1)
+
+# Handle alternative fallback syntax like: .field // default
+q_part = expr
+fallback = None
+if ' // ' in expr:
+    parts = expr.split(' // ', 1)
+    q_part = parts[0].strip()
+    fallback = parts[1].strip()
+
+def resolve(val, query):
+    if not query or query == '.':
+        return val
+    parts = [p for p in query.strip('.').split('.') if p]
+    cur = val
+    for p in parts:
+        if isinstance(cur, dict):
+            cur = cur.get(p)
+        else:
+            return None
+    return cur
+
+res = resolve(data, q_part)
+if res is None and fallback is not None:
+    if fallback == 'empty':
+        res = ''
+    else:
+        try:
+            res = json.loads(fallback)
+        except Exception:
+            res = fallback.strip('\"')
+
+if res is None:
+    sys.exit(1)
+if raw and isinstance(res, str):
+    print(res)
+else:
+    print(json.dumps(res, ensure_ascii=False))
+" "$@"
+  fi
+}
+
 # Read config from file or environment
 if [ -f "$CONFIG_FILE" ]; then
-  API_URL=$(jq -r '.api_url // empty' "$CONFIG_FILE" 2>/dev/null || true)
-  API_KEY=$(jq -r '.api_key // empty' "$CONFIG_FILE" 2>/dev/null || true)
-  YNETMON_URL=$(jq -r '.ynetmon_url // empty' "$CONFIG_FILE" 2>/dev/null || true)
-  YNETMON_KEY=$(jq -r '.ynetmon_key // empty' "$CONFIG_FILE" 2>/dev/null || true)
+  API_URL=$(parse_json -r '.api_url // empty' < "$CONFIG_FILE" 2>/dev/null || true)
+  API_KEY=$(parse_json -r '.api_key // empty' < "$CONFIG_FILE" 2>/dev/null || true)
+  YNETMON_URL=$(parse_json -r '.ynetmon_url // empty' < "$CONFIG_FILE" 2>/dev/null || true)
+  YNETMON_KEY=$(parse_json -r '.ynetmon_key // empty' < "$CONFIG_FILE" 2>/dev/null || true)
 fi
 
 API_URL="${YDEVHUB_API_URL:-${API_URL:-$DEFAULT_URL}}"
@@ -23,7 +89,7 @@ API_KEY="${YDEVHUB_API_KEY:-${API_KEY:-$DEFAULT_KEY}}"
 YNETMON_URL="${YNETMON_URL:-${YNETMON_URL:-$DEFAULT_YNETMON_URL}}"
 YNETMON_KEY="${YNETMON_KEY:-${YNETMON_KEY:-$DEFAULT_YNETMON_KEY}}"
 
-# Colors
+# Terminal Colors
 C_RESET="\033[0m"
 C_BOLD="\033[1m"
 C_GREEN="\033[32m"
@@ -36,6 +102,7 @@ C_MAGENTA="\033[35m"
 
 function show_help() {
   echo -e "${C_BOLD}⚡ YDevHub & Homelab CLI (${API_URL})${C_RESET}"
+  echo -e "${C_GRAY}Linux & macOS destekli uzaktan kontrol ve yönetim aracı${C_RESET}"
   echo ""
   echo -e "${C_BOLD}KULLANIM:${C_RESET}"
   echo "  ydev <komut> [seçenekler]"
@@ -58,19 +125,25 @@ function show_help() {
   echo ""
   echo -e "${C_BOLD}🌐 AĞ & YNETMON (Canlı Ağ Analitiği):${C_RESET}"
   echo "  ydev net | ynetmon"
-  echo "       Canlı bant genişliği, bağlantı ve ağ istatistikleri özeti"
+  echo "       Canlı bant genişliği, aktif soket ve güvenlik alarmları özeti"
   echo "  ydev net-alerts | alerts [--limit N]"
-  echo "       Son güvenlik ve anomali uyarılarını listeler"
+  echo "       Son güvenlik ve aşırı bant genişliği uyarılarını listeler"
   echo "  ydev net-devices | devices [--limit N] [--all]"
-  echo "       Ağdaki aktif ve çevrimdışı cihazları/konteynerleri listeler"
+  echo "       Ağdaki aktif ve kayıtlı cihazları/konteynerleri listeler"
+  echo ""
+  echo -e "${C_BOLD}🚀 KURULUM & DAĞITIM:${C_RESET}"
+  echo "  ydev install cli"
+  echo "       Kişisel bilgisayara (Linux/macOS) ydev komutunu kurar ve API ayarlarını yapar"
+  echo "  ydev install stack | server"
+  echo "       Homelab sunucusunda YDevHub, YNetMon ve Watchtower hazır stack kurar (GHCR)"
   echo ""
   echo -e "${C_BOLD}⚡ HIZLI İŞLEM & SİSTEM:${C_RESET}"
   echo "  ydev quick <metin>"
-  echo "       Tarih/saat içeren doğal metinden otomatik not/görev ayrıştır (alias: q)"
+  echo "       Doğal metinden otomatik not/görev ayrıştır (alias: q)"
   echo "  ydev status | ping"
   echo "       YDevHub ve YNetMon API bağlantılarını test eder"
   echo "  ydev config"
-  echo "       Mevcut CLI bağlantı ve anahtar ayarlarını görüntüler"
+  echo "       Mevcut bağlantı ve API anahtarı ayarlarını görüntüler"
 }
 
 function req() {
@@ -147,18 +220,18 @@ case "$cmd" in
     content=""
     priority="medium"
     due_time=""
-    date_val=""
+    date=""
 
     while [ $# -gt 0 ]; do
       case "$1" in
         -p|--priority) priority="$2"; shift 2 ;;
         --due) due_time="$2"; shift 2 ;;
-        --date) date_val="$2"; shift 2 ;;
+        --date) date="$2"; shift 2 ;;
         *)
           if [ -z "$content" ]; then
             content="$1"
           else
-            content="$content $1"
+            content="${content} $1"
           fi
           shift
           ;;
@@ -166,79 +239,88 @@ case "$cmd" in
     done
 
     if [ -z "$content" ]; then
-      echo -e "${C_RED}❌ Not içeriği belirtilmedi.${C_RESET}" >&2
+      echo -e "${C_RED}❌ Hata: Not içeriği boş olamaz.${C_RESET}" >&2
       exit 1
     fi
 
-    payload=$(jq -n \
-      --arg c "$content" \
-      --arg p "$priority" \
-      --arg dt "$due_time" \
-      --arg d "$date_val" \
-      '{content: $c, priority: $p, due_time: $dt, date: (if $d != "" then $d else null end), source: "cli"}')
+    payload=$(python3 -c "
+import json, sys
+data = {
+    'content': sys.argv[1],
+    'priority': sys.argv[2],
+    'due_time': sys.argv[3],
+    'source': 'cli'
+}
+if sys.argv[4]:
+    data['date'] = sys.argv[4]
+print(json.dumps(data))
+" "$content" "$priority" "$due_time" "$date")
 
     res=$(req POST "/api/v1/notes" "$payload")
-    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
-      id=$(echo "$res" | jq -r '.note.id')
-      date=$(echo "$res" | jq -r '.note.date')
-      echo -e "${C_GREEN}✔ Not eklendi [#${id}]${C_RESET} ${C_GRAY}(${date})${C_RESET}"
-      echo -e "  ${content}"
+
+    if echo "$res" | grep -q '"success":true'; then
+      id=$(echo "$res" | parse_json -r '.note.id')
+      date=$(echo "$res" | parse_json -r '.note.date')
+      echo -e "${C_GREEN}✔ Not eklendi [#${id}] (${date})${C_RESET}"
+      echo "  ${content}"
     else
-      err=$(echo "$res" | jq -r '.error // "Bilinmeyen hata"')
+      err=$(echo "$res" | parse_json -r '.error // "Bilinmeyen hata"')
       echo -e "${C_RED}❌ Not eklenemedi: ${err}${C_RESET}" >&2
       exit 1
     fi
     ;;
 
   notes|notlar)
-    limit=20
-    date_val=""
-    is_done=""
+    limit=15
+    date=""
+    status_filter="all"
 
     while [ $# -gt 0 ]; do
       case "$1" in
         -l|--limit) limit="$2"; shift 2 ;;
-        -d|--date) date_val="$2"; shift 2 ;;
-        --all) is_done=""; shift ;;
-        --pending) is_done="false"; shift ;;
-        --done) is_done="true"; shift ;;
+        -d|--date) date="$2"; shift 2 ;;
+        --pending) status_filter="pending"; shift ;;
+        --done) status_filter="done"; shift ;;
+        --all) status_filter="all"; shift ;;
         *) shift ;;
       esac
     done
 
     query="limit=${limit}"
-    if [ -n "$date_val" ]; then query="${query}&date=${date_val}"; fi
-    if [ -n "$is_done" ]; then query="${query}&is_done=${is_done}"; fi
+    [ -n "$date" ] && query="${query}&date=${date}"
+    [ "$status_filter" != "all" ] && query="${query}&status=${status_filter}"
 
     res=$(req GET "/api/v1/notes?${query}")
-    if ! echo "$res" | jq -e '.success' >/dev/null 2>&1; then
-      err=$(echo "$res" | jq -r '.error // "Bilinmeyen hata"')
+
+    if ! echo "$res" | grep -q '"success":true'; then
+      err=$(echo "$res" | parse_json -r '.error // "Bilinmeyen hata"')
       echo -e "${C_RED}❌ Notlar alınamadı: ${err}${C_RESET}" >&2
       exit 1
     fi
 
-    count=$(echo "$res" | jq -r '.notes | length')
-    echo -e "${C_BOLD}📝 Günlük Notlar (${count} kayıt):${C_RESET}"
-    echo "$res" | jq -r '.notes[] | "[\(.id)] \(.date) \(if .is_done then "✔" else "○" end) [\(.priority)] \(.content)"' | while read -r line; do
-      if [[ "$line" =~ "✔" ]]; then
-        echo -e "${C_GRAY}${line}${C_RESET}"
-      else
-        echo -e "${C_CYAN}${line}${C_RESET}"
-      fi
-    done
+    python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read())
+notes = data.get('notes', [])
+print(f'📝 Günlük Notlar ({len(notes)} kayıt):')
+for n in notes:
+    icon = '✔' if n.get('is_done') else '○'
+    time_str = f\" [⏰ {n['due_time']}]\" if n.get('due_time') else ''
+    print(f\"[{n['id']}] {n.get('date', '')} {icon} [{n.get('priority', 'medium')}]{time_str} {n.get('content', '')}\")
+" <<< "$res"
     ;;
 
   note-done|not-yapildi)
-    id="$1"
+    id="${1:-}"
     if [ -z "$id" ]; then
-      echo -e "${C_RED}❌ Not ID belirtilmedi.${C_RESET}" >&2
+      echo -e "${C_RED}❌ Hata: Not ID belirtilmedi.${C_RESET}" >&2
       exit 1
     fi
-    res=$(req PATCH "/api/v1/notes" "{\"id\": $id, \"is_done\": true}")
-    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+    res=$(req PATCH "/api/v1/notes" "{\"id\":${id},\"is_done\":true}")
+    if echo "$res" | grep -q '"success":true'; then
       echo -e "${C_GREEN}✔ Not [#${id}] tamamlandı olarak işaretlendi.${C_RESET}"
     else
-      echo -e "${C_RED}❌ Güncellenemedi.${C_RESET}" >&2
+      echo -e "${C_RED}❌ Not tamamlanamadı.${C_RESET}" >&2
       exit 1
     fi
     ;;
@@ -248,19 +330,17 @@ case "$cmd" in
     desc=""
     priority="medium"
     due_date=""
-    project_id=""
 
     while [ $# -gt 0 ]; do
       case "$1" in
-        -d|--desc|--description) desc="$2"; shift 2 ;;
+        -d|--desc) desc="$2"; shift 2 ;;
         -p|--priority) priority="$2"; shift 2 ;;
         --due) due_date="$2"; shift 2 ;;
-        --proj|--project) project_id="$2"; shift 2 ;;
         *)
           if [ -z "$title" ]; then
             title="$1"
           else
-            title="$title $1"
+            title="${title} $1"
           fi
           shift
           ;;
@@ -268,79 +348,79 @@ case "$cmd" in
     done
 
     if [ -z "$title" ]; then
-      echo -e "${C_RED}❌ Görev başlığı belirtilmedi.${C_RESET}" >&2
+      echo -e "${C_RED}❌ Hata: Görev başlığı boş olamaz.${C_RESET}" >&2
       exit 1
     fi
 
-    payload=$(jq -n \
-      --arg t "$title" \
-      --arg d "$desc" \
-      --arg p "$priority" \
-      --arg dd "$due_date" \
-      --arg pid "$project_id" \
-      '{title: $t, description: $d, priority: $p, due_date: $dd, project_id: (if $pid != "" then ($pid | tonumber) else null end)}')
+    payload=$(python3 -c "
+import json, sys
+data = {
+    'title': sys.argv[1],
+    'description': sys.argv[2],
+    'priority': sys.argv[3],
+    'due_date': sys.argv[4] if sys.argv[4] else None
+}
+print(json.dumps(data))
+" "$title" "$desc" "$priority" "$due_date")
 
     res=$(req POST "/api/v1/tasks" "$payload")
-    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
-      id=$(echo "$res" | jq -r '.task.id')
-      echo -e "${C_GREEN}✔ Görev eklendi [#${id}]${C_RESET} [${priority}]"
-      echo -e "  ${C_BOLD}${title}${C_RESET}"
-      if [ -n "$desc" ]; then
-        echo -e "  ${C_GRAY}${desc}${C_RESET}"
-      fi
+
+    if echo "$res" | grep -q '"success":true'; then
+      id=$(echo "$res" | parse_json -r '.task.id')
+      echo -e "${C_GREEN}✔ Görev eklendi [#${id}]${C_RESET}"
+      echo "  ${title}"
     else
-      err=$(echo "$res" | jq -r '.error // "Bilinmeyen hata"')
+      err=$(echo "$res" | parse_json -r '.error // "Bilinmeyen hata"')
       echo -e "${C_RED}❌ Görev eklenemedi: ${err}${C_RESET}" >&2
       exit 1
     fi
     ;;
 
   tasks|gorevler)
+    limit=15
     status=""
-    limit=20
 
     while [ $# -gt 0 ]; do
       case "$1" in
-        -s|--status) status="$2"; shift 2 ;;
         -l|--limit) limit="$2"; shift 2 ;;
+        -s|--status) status="$2"; shift 2 ;;
         *) shift ;;
       esac
     done
 
     query="limit=${limit}"
-    if [ -n "$status" ]; then query="${query}&status=${status}"; fi
+    [ -n "$status" ] && query="${query}&status=${status}"
 
     res=$(req GET "/api/v1/tasks?${query}")
-    if ! echo "$res" | jq -e '.success' >/dev/null 2>&1; then
-      err=$(echo "$res" | jq -r '.error // "Bilinmeyen hata"')
+
+    if ! echo "$res" | grep -q '"success":true'; then
+      err=$(echo "$res" | parse_json -r '.error // "Bilinmeyen hata"')
       echo -e "${C_RED}❌ Görevler alınamadı: ${err}${C_RESET}" >&2
       exit 1
     fi
 
-    count=$(echo "$res" | jq -r '.tasks | length')
-    echo -e "${C_BOLD}📋 Görev Listesi (${count} kayıt):${C_RESET}"
-    echo "$res" | jq -r '.tasks[] | "[\(.id)] [\(.status)] [\(.priority)] \(.title)"' | while read -r line; do
-      if [[ "$line" =~ "[done]" ]]; then
-        echo -e "${C_GRAY}${line}${C_RESET}"
-      elif [[ "$line" =~ "[in_progress]" ]]; then
-        echo -e "${C_YELLOW}${line}${C_RESET}"
-      else
-        echo -e "${C_CYAN}${line}${C_RESET}"
-      fi
-    done
+    python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read())
+tasks = data.get('tasks', [])
+print(f'📋 Görev Listesi ({len(tasks)} kayıt):')
+for t in tasks:
+    time_str = f\" [⏰ {t['due_date']}]\" if t.get('due_date') else ''
+    print(f\"[{t['id']}] [{t.get('status', 'todo')}] [{t.get('priority', 'medium')}]{time_str} {t.get('title', '')}\")
+" <<< "$res"
     ;;
 
   task-done|gorev-yapildi)
-    id="$1"
+    id="${1:-}"
     if [ -z "$id" ]; then
-      echo -e "${C_RED}❌ Görev ID belirtilmedi.${C_RESET}" >&2
+      echo -e "${C_RED}❌ Hata: Görev ID belirtilmedi.${C_RESET}" >&2
       exit 1
     fi
-    res=$(req PATCH "/api/v1/tasks" "{\"id\": $id, \"status\": \"done\"}")
-    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
-      echo -e "${C_GREEN}✔ Görev [#${id}] tamamlandı olarak güncellendi.${C_RESET}"
+    res=$(req POST "/api/v1/tasks" "{\"action\":\"done\",\"id\":${id}}")
+    if echo "$res" | grep -q '"success":true'; then
+      echo -e "${C_GREEN}✔ Görev [#${id}] tamamlandı olarak işaretlendi.${C_RESET}"
     else
-      echo -e "${C_RED}❌ Güncellenemedi.${C_RESET}" >&2
+      echo -e "${C_RED}❌ Görev tamamlanamadı.${C_RESET}" >&2
       exit 1
     fi
     ;;
@@ -348,51 +428,57 @@ case "$cmd" in
   quick|q)
     text="$*"
     if [ -z "$text" ]; then
-      echo -e "${C_RED}❌ Metin belirtilmedi.${C_RESET}" >&2
+      echo -e "${C_RED}❌ Hata: Metin belirtilmedi.${C_RESET}" >&2
       exit 1
     fi
-    payload=$(jq -n --arg t "$text" '{text: $t}')
+
+    payload=$(python3 -c "import json, sys; print(json.dumps({'text': sys.argv[1]}))" "$text")
     res=$(req POST "/api/v1/quick" "$payload")
-    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
-      type=$(echo "$res" | jq -r '.type')
-      id=$(echo "$res" | jq -r '.data.id')
-      echo -e "${C_GREEN}✔ Hızlı kayıt (${type}) eklendi [#${id}]${C_RESET}"
+
+    if echo "$res" | grep -q '"success":true'; then
+      type=$(echo "$res" | parse_json -r '.type')
+      id=$(echo "$res" | parse_json -r '.data.id')
+      echo -e "${C_GREEN}✔ Otomatik ${type} oluşturuldu [#${id}]${C_RESET}"
     else
-      echo -e "${C_RED}❌ Eklenemedi.${C_RESET}" >&2
+      echo -e "${C_RED}❌ Ayrıştırma başarısız oldu.${C_RESET}" >&2
       exit 1
     fi
     ;;
 
-  net|ynetmon|network)
+  net|ynetmon)
     res=$(ynetmon_req "/api/v1/integration/summary")
-    rx_raw=$(echo "$res" | jq -r '.rx_bps // 0')
-    tx_raw=$(echo "$res" | jq -r '.tx_bps // 0')
+
+    rx_raw=$(echo "$res" | parse_json -r '.rx_bps // 0')
+    tx_raw=$(echo "$res" | parse_json -r '.tx_bps // 0')
     rx_fmt=$(format_bps "$rx_raw")
     tx_fmt=$(format_bps "$tx_raw")
 
-    active_conns=$(echo "$res" | jq -r '.active_connections // 0')
-    containers=$(echo "$res" | jq -r '.docker_containers // 0')
-    active_devs=$(echo "$res" | jq -r '.storage.active_devices_count // .storage.devices_count // 0')
-    total_devs=$(echo "$res" | jq -r '.storage.total_devices_count // 0')
-    alerts_count=$(echo "$res" | jq -r '.storage.alerts_count // 0')
-    db_size=$(echo "$res" | jq -r '.storage.db_size_mb // 0')
-    cap_mode=$(echo "$res" | jq -r '.capture_mode // "N/A"')
+    active_conns=$(echo "$res" | parse_json -r '.active_connections // 0')
+    containers=$(echo "$res" | parse_json -r '.docker_containers // 0')
+    active_devs=$(echo "$res" | parse_json -r '.storage.active_devices_count // .storage.devices_count // 0')
+    total_devs=$(echo "$res" | parse_json -r '.storage.total_devices_count // 0')
+    alerts_count=$(echo "$res" | parse_json -r '.storage.alerts_count // 0')
+    db_size=$(echo "$res" | parse_json -r '.storage.db_size_mb // 0')
+    cap_mode=$(echo "$res" | parse_json -r '.capture_mode // "N/A"')
 
-    echo -e "${C_BOLD}🌐 YNetMon Ağ Durumu & Trafik Analizi${C_RESET} ${C_GRAY}(${YNETMON_URL})${C_RESET}"
+    echo -e "${C_BOLD}🌐 YNetMon Ağ Durumu & Trafik Analizi (${YNETMON_URL})${C_RESET}"
     echo -e "  İndirme (RX):    ${C_GREEN}${rx_fmt}${C_RESET}"
     echo -e "  Yükleme (TX):    ${C_CYAN}${tx_fmt}${C_RESET}"
     echo -e "  Aktif Bağlantı:  ${C_BOLD}${active_conns}${C_RESET}"
     echo -e "  Cihazlar:        ${C_BOLD}${active_devs}${C_RESET} aktif / ${total_devs} toplam"
-    echo -e "  Konteynerler:    ${C_BLUE}${containers}${C_RESET} Docker izleniyor"
+    echo -e "  Konteynerler:    ${C_BOLD}${containers}${C_RESET} Docker izleniyor"
     echo -e "  Yakalama Modu:   ${C_YELLOW}${cap_mode}${C_RESET}"
     echo -e "  Veritabanı:      ${db_size} MB | ${alerts_count} Güvenlik Uyarısı"
 
-    recent_count=$(echo "$res" | jq -r '.recent_alerts | length // 0')
-    if [ "$recent_count" -gt 0 ]; then
-      echo ""
-      echo -e "  ${C_YELLOW}⚠️ Son Uyarılar:${C_RESET}"
-      echo "$res" | jq -r '.recent_alerts[0:3][] | "    • [\(.severity | ascii_upcase)] \(.rule_name): \(.message)"'
-    fi
+    python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read())
+alerts = data.get('recent_alerts', [])
+if alerts:
+    print('\n  ⚠️ Son Uyarılar:')
+    for a in alerts[:3]:
+        print(f\"    • [{a.get('severity','').upper()}] {a.get('rule_name','')}: {a.get('message','')}\")
+" <<< "$res"
     ;;
 
   net-alerts|alerts)
@@ -405,29 +491,19 @@ case "$cmd" in
     done
 
     res=$(ynetmon_req "/api/v1/integration/alerts?limit=${limit}")
-    count=$(echo "$res" | jq -r '.alerts | length // 0')
-    echo -e "${C_BOLD}🚨 YNetMon Güvenlik & Trafik Uyarıları (${count} kayıt):${C_RESET}"
-
-    if [ "$count" -eq 0 ]; then
-      echo -e "${C_GREEN}  Aktif uyarı bulunmuyor. Ağ temiz.${C_RESET}"
-    else
-      echo "$res" | jq -c '.alerts[]' | while read -r item; do
-        sev=$(echo "$item" | jq -r '.severity // "info"')
-        rule=$(echo "$item" | jq -r '.rule_name // "Uyarı"')
-        msg=$(echo "$item" | jq -r '.message // ""')
-        src=$(echo "$item" | jq -r '.src_ip // "-"')
-
-        if [ "$sev" = "high" ] || [ "$sev" = "critical" ]; then
-          prefix="${C_RED}[${sev^^}]${C_RESET}"
-        elif [ "$sev" = "medium" ]; then
-          prefix="${C_YELLOW}[${sev^^}]${C_RESET}"
-        else
-          prefix="${C_BLUE}[${sev^^}]${C_RESET}"
-        fi
-        echo -e "  ${prefix} ${C_BOLD}${rule}${C_RESET} (${src})"
-        echo -e "    ${C_GRAY}${msg}${C_RESET}"
-      done
-    fi
+    python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read())
+alerts = data.get('alerts', [])
+print(f'🚨 YNetMon Güvenlik & Trafik Uyarıları ({len(alerts)} kayıt):')
+if not alerts:
+    print('  Aktif uyarı bulunmuyor. Ağ temiz.')
+for a in alerts:
+    sev = a.get('severity', 'info').upper()
+    src = a.get('src_ip', '-')
+    print(f\"  [{sev}] {a.get('rule_name', 'Uyarı')} ({src})\")
+    print(f\"    {a.get('message', '')}\")
+" <<< "$res"
     ;;
 
   net-devices|devices)
@@ -442,39 +518,171 @@ case "$cmd" in
     done
 
     res=$(ynetmon_req "/api/v1/integration/devices")
-    active_count=$(echo "$res" | jq -r '.active_count // 0')
-    total_count=$(echo "$res" | jq -r '.count // 0')
+    python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read())
+devices = data.get('devices', [])
+active_c = data.get('active_count', 0)
+total_c = data.get('count', 0)
+print(f'📱 YNetMon Ağ Cihazları ({active_c} aktif / {total_c} toplam):')
 
-    echo -e "${C_BOLD}📱 YNetMon Ağ Cihazları (${active_count} aktif / ${total_count} toplam):${C_RESET}"
+show_all = '$show_all' == 'true'
+lim = int('$limit')
+filtered = devices if show_all else [d for d in devices if d.get('is_online')]
 
-    if [ "$show_all" = "true" ]; then
-      filter_expr=".devices[0:${limit}][]"
-    else
-      filter_expr="[.devices[] | select(.is_online == true)][0:${limit}][]"
-    fi
+def fmt_bytes(b):
+    if b >= 1073741824: return f'{b/1073741824:.2f} GB'
+    if b >= 1048576: return f'{b/1048576:.2f} MB'
+    if b >= 1024: return f'{b/1024:.1f} KB'
+    return f'{b} B'
 
-    echo "$res" | jq -c "$filter_expr" | while read -r item; do
-      ip=$(echo "$item" | jq -r '.ip')
-      vendor=$(echo "$item" | jq -r '.vendor // "Bilinmeyen"')
-      dev_type=$(echo "$item" | jq -r '.device_type // "LAN"')
-      container=$(echo "$item" | jq -r '.container_name // ""')
-      online=$(echo "$item" | jq -r '.is_online')
-      total_b=$(echo "$item" | jq -r '.total_bytes // 0')
-      bytes_fmt=$(format_bytes "$total_b")
+for d in filtered[:lim]:
+    ip = d.get('ip', '-')
+    online = '● Aktif' if d.get('is_online') else '○ Çevrimdışı'
+    dev_type = f\"[{d.get('device_type', 'LAN')}]\"
+    name = d.get('container_name') or d.get('vendor') or 'Bilinmeyen'
+    b_fmt = fmt_bytes(d.get('total_bytes', 0))
+    print(f'  {ip:<15} {online:<14} {dev_type:<8} {name:<26} {b_fmt:>10}')
+" <<< "$res"
+    ;;
 
-      name_str="$vendor"
-      if [ -n "$container" ]; then
-        name_str="${container} (${vendor})"
-      fi
+  install)
+    subcmd="${1:-cli}"
+    shift || true
 
-      if [ "$online" = "true" ]; then
-        status_tag="${C_GREEN}● Aktif${C_RESET}"
-      else
-        status_tag="${C_GRAY}○ Çevrimdışı${C_RESET}"
-      fi
+    case "$subcmd" in
+      cli)
+        echo -e "${C_BOLD}🚀 YDevHub CLI Yerel Kurulum Sihirbazı (Linux & macOS)${C_RESET}\n"
+        TARGET_BIN="/usr/local/bin"
+        if [ "$(id -u)" -ne 0 ]; then
+          TARGET_BIN="${HOME}/.local/bin"
+        fi
+        mkdir -p "${TARGET_BIN}"
+        cp "$0" "${TARGET_BIN}/ydev"
+        chmod +x "${TARGET_BIN}/ydev"
+        echo -e "${C_GREEN}✔ 'ydev' komutu '${TARGET_BIN}/ydev' dizinine kopyalandı.${C_RESET}"
 
-      printf "  %-15s %-16b %-8b %-30s %10s\n" "$ip" "$status_tag" "[$dev_type]" "$name_str" "$bytes_fmt"
-    done
+        mkdir -p "$(dirname "$CONFIG_FILE")"
+        echo -e "\n${C_BOLD}⚙️  API Bağlantı Yapılandırması:${C_RESET}"
+        read -r -p "  YDevHub API URL [${DEFAULT_URL}]: " input_url
+        input_url="${input_url:-$DEFAULT_URL}"
+
+        read -r -p "  YDevHub API Key [${DEFAULT_KEY}]: " input_key
+        input_key="${input_key:-$DEFAULT_KEY}"
+
+        read -r -p "  YNetMon API URL [${DEFAULT_YNETMON_URL}]: " input_ynet_url
+        input_ynet_url="${input_ynet_url:-$DEFAULT_YNETMON_URL}"
+
+        read -r -p "  YNetMon API Key [${DEFAULT_YNETMON_KEY}]: " input_ynet_key
+        input_ynet_key="${input_ynet_key:-$DEFAULT_YNETMON_KEY}"
+
+        python3 -c "
+import json, sys
+cfg = {
+    'api_url': sys.argv[1],
+    'api_key': sys.argv[2],
+    'ynetmon_url': sys.argv[3],
+    'ynetmon_key': sys.argv[4]
+}
+with open('$CONFIG_FILE', 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2)
+" "$input_url" "$input_key" "$input_ynet_url" "$input_ynet_key"
+
+        echo -e "\n${C_GREEN}✔ Ayarlar kaydedildi: ${CONFIG_FILE}${C_RESET}"
+        ;;
+
+      stack|server)
+        echo -e "${C_BOLD}🐳 YDevHub & YNetMon Sunucu Stack Kurulum Sihirbazı${C_RESET}"
+        echo -e "${C_GRAY}Homelab sunucuları için GHCR hazır konteyner dağıtımı (Derleme yapmaz)${C_RESET}\n"
+
+        read -r -p "  Stack nereye kurulsun? [./homelab-stack]: " target_dir
+        target_dir="${target_dir:-./homelab-stack}"
+        mkdir -p "$target_dir"
+
+        read -r -p "  YDevHub Port [3080]: " port_hub
+        port_hub="${port_hub:-3080}"
+
+        read -r -p "  YNetMon Port [8765]: " port_ynet
+        port_ynet="${port_ynet:-8765}"
+
+        read -r -p "  YNetMon API Secret Key [ynetmon_secret_hub_key_2026]: " secret_ynet
+        secret_ynet="${secret_ynet:-ynetmon_secret_hub_key_2026}"
+
+        cat << EOF > "${target_dir}/docker-compose.yml"
+services:
+  ydevhub:
+    image: ghcr.io/yagyz/ydevhub:latest
+    container_name: ydevhub-app
+    restart: unless-stopped
+    ports:
+      - "${port_hub}:3000"
+    environment:
+      - NODE_ENV=production
+      - DB_DIR=/app/data
+      - DB_PATH=/app/data/ydevhub.db
+      - APP_PORT=${port_hub}
+      - HOST_DATA_DIR=\${HOST_DATA_DIR:-/DATA/AppData/ydevhub}
+      - TZ=Europe/Istanbul
+    volumes:
+      - \${HOST_DATA_DIR:-/DATA/AppData/ydevhub}:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/localtime:/etc/localtime:ro
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  ynetmon:
+    image: ghcr.io/yagyz/ynetmon:latest
+    container_name: ynetmon-app
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - /DATA/AppData/ynetmon:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - TZ=Europe/Istanbul
+      - YNETMON_PORT=${port_ynet}
+      - YNETMON_DB=/app/data/ynetmon.db
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: ydevhub-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_POLL_INTERVAL=60
+      - TZ=Europe/Istanbul
+EOF
+
+        echo -e "\n${C_GREEN}✔ Hazır docker-compose.yml dosyası oluşturuldu: ${target_dir}/docker-compose.yml${C_RESET}"
+        if command -v docker >/dev/null 2>&1; then
+          read -r -p "  Servisler şimdi ayağa kaldırılsın mı? (E/h): " start_now
+          if [[ "${start_now,,}" =~ ^(e|evet|y|yes|)$ ]]; then
+            (cd "$target_dir" && docker compose up -d)
+            echo -e "${C_GREEN}✔ Tüm konteynerler başarıyla başlatıldı!${C_RESET}"
+          fi
+        fi
+        ;;
+
+      *)
+        echo "Kullanım: ydev install [cli|stack]"
+        ;;
+    esac
     ;;
 
   status|ping)
@@ -482,7 +690,7 @@ case "$cmd" in
     res=$(req GET "/api/v1/notes?limit=1")
     end_time=$(date +%s%3N 2>/dev/null || date +%s)
     diff=$(( end_time - start_time ))
-    if echo "$res" | jq -e '.success' >/dev/null 2>&1; then
+    if echo "$res" | grep -q '"success":true'; then
       echo -e "${C_GREEN}✔ YDevHub REST API Aktif & Sağlıklı!${C_RESET}"
       echo -e "  URL:     ${API_URL}"
       echo -e "  Gecikme: ~${diff} ms"
@@ -497,10 +705,10 @@ case "$cmd" in
       -H "X-API-Key: ${YNETMON_KEY}" \
       --connect-timeout 2 --max-time 4 2>/dev/null || true)
 
-    if echo "$ynet_res" | jq -e '.service == "YNetMon"' >/dev/null 2>&1; then
+    if echo "$ynet_res" | grep -q '"service":"YNetMon"'; then
       echo -e "${C_GREEN}✔ YNetMon Entegrasyon API Aktif & Sağlıklı!${C_RESET}"
       echo -e "  URL:     ${YNETMON_URL}"
-      echo -e "  Mod:     $(echo "$ynet_res" | jq -r '.capture_mode')"
+      echo -e "  Mod:     $(echo "$ynet_res" | parse_json -r '.capture_mode')"
     else
       echo -e "${C_YELLOW}⚠️  YNetMon servisine ulaşılamadı (${YNETMON_URL}).${C_RESET}"
     fi
