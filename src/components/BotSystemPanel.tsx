@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Key,
   Copy,
+  Globe,
 } from "lucide-react";
 
 interface BotSystemPanelProps {
@@ -45,6 +46,9 @@ export default function BotSystemPanel({
   const [botMsg, setBotMsg] = useState("");
   const [testSending, setTestSending] = useState(false);
   const [keyCopied, setKeyCopied] = useState(false);
+  const [ynetmonKeyInput, setYnetmonKeyInput] = useState("");
+  const [ynetmonSaving, setYnetmonSaving] = useState(false);
+  const [ynetmonMsg, setYnetmonMsg] = useState("");
 
   // System status state
   const [systemData, setSystemData] = useState<any>(null);
@@ -551,6 +555,82 @@ export default function BotSystemPanel({
             <div className="pl-4 text-zinc-300">
               -d &apos;&#123;&quot;content&quot;: &quot;Yeni not&quot;, &quot;priority&quot;: &quot;medium&quot;&#125;&apos;
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* CARD 5: YNETMON API KEY INTEGRATION */}
+      <div className="p-4 sm:p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800 pb-3 gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <Globe className="w-5 h-5 text-sky-400 shrink-0" />
+            <div>
+              <h3 className="text-sm font-semibold text-white">
+                YNetMon API Entegrasyonu
+              </h3>
+              <p className="text-xs text-zinc-500">
+                YDevHub Telegram botu ve CLI araçlarının canlı ağ trafiği ve güvenlik alarmlarını çekmesi için kullanılır.
+              </p>
+            </div>
+          </div>
+          <span className={`px-2.5 py-1 rounded-lg border text-xs font-mono flex items-center gap-1.5 ${
+            sysConfig?.ynetmonConfigured
+              ? "bg-emerald-950/60 border-emerald-800 text-emerald-400"
+              : "bg-zinc-950 border-zinc-800 text-zinc-500"
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${sysConfig?.ynetmonConfigured ? "bg-emerald-400" : "bg-zinc-600"}`} />
+            {sysConfig?.ynetmonConfigured ? "API Anahtarı Tanımlı" : "Bağlantı Bekleniyor"}
+          </span>
+        </div>
+
+        <div className="space-y-3 text-xs">
+          <div>
+            <label className="block text-zinc-400 font-medium mb-1">
+              YNetMon API Anahtarı (X-API-Key)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                placeholder={sysConfig?.ynetmonConfigured ? "•••••••••••••••••••• (Değiştirmek için yeni anahtar girin)" : "YNetMon'dan üretilen API anahtarını yapıştırın (ynm_...)"}
+                value={ynetmonKeyInput}
+                onChange={(e) => setYnetmonKeyInput(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-sm text-sky-300 font-mono tracking-wider focus:outline-none focus:border-sky-500"
+              />
+              <button
+                type="button"
+                disabled={!ynetmonKeyInput.trim() || ynetmonSaving}
+                onClick={async () => {
+                  if (!ynetmonKeyInput.trim()) return;
+                  setYnetmonSaving(true);
+                  setYnetmonMsg("");
+                  try {
+                    await onSaveSysConfig({
+                      ...sysConfig,
+                      ynetmonApiKey: ynetmonKeyInput.trim(),
+                    });
+                    setYnetmonKeyInput("");
+                    setYnetmonMsg("YNetMon API anahtarı başarıyla güncellendi.");
+                    setTimeout(() => setYnetmonMsg(""), 3500);
+                  } catch (err: any) {
+                    setYnetmonMsg("Hata: " + err.message);
+                  } finally {
+                    setYnetmonSaving(false);
+                  }
+                }}
+                className="px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition shrink-0"
+              >
+                {ynetmonSaving ? "Kaydediliyor..." : "Kaydet"}
+              </button>
+            </div>
+            {ynetmonMsg && (
+              <p className={`mt-1.5 text-xs ${ynetmonMsg.startsWith("Hata") ? "text-rose-400" : "text-emerald-400"}`}>
+                {ynetmonMsg}
+              </p>
+            )}
+          </div>
+
+          <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800/80 text-[11.5px] text-zinc-400 leading-relaxed">
+            💡 <strong>Nasıl Alınır?</strong> YNetMon panelinde <em>5. Alarmlar &amp; Ayarlar</em> sekmesinden <strong>Yeni Anahtar Üret</strong> butonuna basarak üretilen <code>ynm_...</code> anahtarını buraya yapıştırıp kaydedin. Telegram botu üzerinden <code>/ag</code>, <code>/alarmlar</code> ve <code>/cihazlar</code> sorguları bu anahtarla yetkilendirilir.
           </div>
         </div>
       </div>

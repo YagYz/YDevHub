@@ -2,6 +2,9 @@ import { getDb, getSetting, setSetting } from "./db";
 import { getSystemStatus, restartDockerContainer } from "./systemMonitor";
 import {
   getYNetMonSummary,
+  getYNetMonAlerts,
+  getYNetMonDevices,
+  getYNetMonPackets,
   getAdGuardStats,
   setAdGuardProtection,
   formatBitsPerSec,
@@ -419,37 +422,165 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
   const today = new Date().toISOString().slice(0, 10);
   const db = getDb();
 
-  // Komutlar
-  if (/^[/]?(?:start|yardim|help)$/i.test(text)) {
-    const helpMsg = `⚡ <b>YDevHub Asistan Komutları</b>\n
-📋 <b>Görev Yönetimi & Hatırlatma:</b>
-• <code>/gorev [başlık]</code> - Genel görev ekler
-• <code>/gorev 15:30 [başlık]</code> - Saatli görev (1 saat önce hatırlatır)
-• <code>/gorev 04-11-2026 14:00 [başlık]</code> - Tarihli ve saatli görev
-• <code>/tamam g2</code> - [G-2] numaralı görevi tamamlar
-• <code>/ertele g2</code> - Görevi 1 saat erteler
-• <code>/ertele g2 yarin</code> - Görevi yarına erteler
+  // Komutlar: /help, /yardim, /start veya /help <komut>
+  if (/^[/]?(?:start|yardim|help)\b/i.test(text)) {
+    const rawSubCmd = text.replace(/^[/]?(?:start|yardim|help)\s*/i, "").trim().toLowerCase();
 
-📝 <b>Not Alma & Erteleme:</b>
-• <i>Düz metin:</i> Doğrudan bugünün notlarına ekler.
-• <code>/not [not]</code> veya <code>not [not]</code> - Bugünün notlarına ekler
-• <code>/not 04-11-2026 14:00 [not]</code> - Belirli tarih ve saate ekler
-• <code>/tamam n2</code> - [N-2] notunu tamamlar
-• <code>/ertele n2</code> - Notu yarına erteler
+    // /help <komut> detaylı yardım
+    if (rawSubCmd) {
+      let subHelp = "";
+      const cmdKey = rawSubCmd.replace(/^[/]/, "");
 
-🌐 <b>Ağ & DNS (YNetMon & AdGuard):</b>
-• <code>/ag</code> - YNetMon anlık bant genişliği, aktif bağlantı ve alarmlar
-• <code>/dns</code> - AdGuard 24 saatlik reklam/tehdit engelleme raporu
-• <code>/dns kapat 10m</code> - DNS korumasını 10 dakika duraklatır
-• <code>/dns ac</code> - DNS korumasını tekrar açar
+      switch (cmdKey) {
+        case "gorev":
+        case "task":
+        case "gorevler":
+          subHelp = `📋 <b>/gorev Komutu Kullanımı</b>\n\n` +
+            `Yeni bir yapılacak görev tanımlar. Saat belirtilirse 1 saat öncesinde Telegram'dan hatırlatma yapar.\n\n` +
+            `<b>Örnekler:</b>\n` +
+            `• <code>/gorev Sunucu yedeklerini kontrol et</code> (Tarihsiz genel görev)\n` +
+            `• <code>/gorev 15:30 Toplantı notlarını derle</code> (Bugün 15:30 için)\n` +
+            `• <code>/gorev yarin 10:00 Paket analizini incele</code>\n` +
+            `• <code>/gorev 05-11-2026 14:00 Docker imajını güncelle</code>`;
+          break;
 
-🐳 <b>Sistem & Konteyner:</b>
-• <code>/durum</code> veya <code>/ps</code> - Aktif Docker ve sunucu süreçleri
-• <code>/restart [konteyner]</code> - Konteyneri yeniden başlatır (örn: <code>/restart ynetmon</code>)
-• <code>/bugun</code> - Bugünün notlarını ve bekleyen görevlerini döker
+        case "not":
+        case "note":
+        case "n":
+          subHelp = `📝 <b>/not Komutu Kullanımı</b>\n\n` +
+            `Gündelik deftere hızlı not kaydeder. Özel bir komut yazmadan düz metin göndermek de doğrudan bugünün notlarına ekler.\n\n` +
+            `<b>Örnekler:</b>\n` +
+            `• <code>/not DNS sunucu portu 53 olarak değiştirildi</code>\n` +
+            `• <code>/not 14:00 Sunucuya yeniden bağlanıldı</code>\n` +
+            `• <code>/not yarin Kontrol edilecekler listesi</code>\n` +
+            `• <i>Düz metin:</i> "Market alışverişi yapılacak"`;
+          break;
 
-⚙️ <b>Yönetim:</b>
-• <code>/yardim</code> - Bu yardım mesajını gösterir`;
+        case "tamam":
+        case "done":
+        case "bitir":
+        case "tamamla":
+        case "ntamam":
+        case "gtamam":
+          subHelp = `✅ <b>/tamam Komutu Kullanımı</b>\n\n` +
+            `Gündelik notları veya görevleri tamamlandı olarak işaretler.\n\n` +
+            `<b>Örnekler:</b>\n` +
+            `• <code>/tamam g2</code> - [G-2] numaralı görevi tamamlar\n` +
+            `• <code>/tamam n5</code> - [N-5] numaralı notu tamamlar\n` +
+            `• <code>/tamam 4</code> - ID 4 olan görev/notu otomatik tespit edip tamamlar\n` +
+            `• <code>/gtamam 2</code> veya <code>/ntamam 5</code>`;
+          break;
+
+        case "ertele":
+        case "snooze":
+        case "postpone":
+          subHelp = `⏰ <b>/ertele Komutu Kullanımı</b>\n\n` +
+            `Görev veya notun tarihini/saatini ileriye öteler.\n\n` +
+            `<b>Örnekler:</b>\n` +
+            `• <code>/ertele g2</code> - Görevi 1 saat erteler\n` +
+            `• <code>/ertele g2 yarin</code> - Görevi yarına erteler\n` +
+            `• <code>/ertele g2 2 saat</code> - 2 saat öteler\n` +
+            `• <code>/ertele n3 yarin 10:00</code> - Notu yarına taşır`;
+          break;
+
+        case "ag":
+        case "net":
+        case "ynetmon":
+        case "agdurum":
+        case "paketler":
+        case "alarmlar":
+          subHelp = `🌐 <b>/ag Komutu Kullanımı (YNetMon)</b>\n\n` +
+            `YNetMon servisine bağlanarak anlık bant genişliği (indirme/yükleme), aktif soket/bağlantı sayısı, yakalanan paketler ve son güvenlik alarmlarını listeler.\n\n` +
+            `<b>Komutlar:</b>\n` +
+            `• <code>/ag</code> veya <code>/net</code> - Canlı ağ ve güvenlik raporu\n` +
+            `• <code>/ynetmon</code> - Alternatif komut`;
+          break;
+
+        case "dns":
+        case "adguard":
+          subHelp = `🛡️ <b>/dns Komutu Kullanımı (AdGuard Home)</b>\n\n` +
+            `AdGuard Home DNS istatistiklerini görüntüler veya filtreleme korumasını geçici olarak açıp kapatır.\n\n` +
+            `<b>Örnekler:</b>\n` +
+            `• <code>/dns</code> - 24 saatlik engelleme ve sorgu özeti\n` +
+            `• <code>/dns kapat 10m</code> - DNS korumasını 10 dakika duraklatır\n` +
+            `• <code>/dns kapat 1h</code> - Koruma 1 saat kapatılır\n` +
+            `• <code>/dns ac</code> - Filtrelemeyi hemen tekrar başlatır`;
+          break;
+
+        case "durum":
+        case "ps":
+        case "sistem":
+        case "server":
+          subHelp = `🐳 <b>/durum Komutu Kullanımı</b>\n\n` +
+            `Sunucunun CPU, RAM, disk kullanımı ile Docker konteynerlerinin anlık çalışma durumlarını listeler.\n\n` +
+            `<b>Örnekler:</b>\n` +
+            `• <code>/durum</code>\n` +
+            `• <code>/ps</code>`;
+          break;
+
+        case "restart":
+        case "reboot":
+          subHelp = `🔄 <b>/restart Komutu Kullanımı</b>\n\n` +
+            `Belirtilen Docker konteynerini sunucuda güvenli şekilde yeniden başlatır.\n\n` +
+            `<b>Örnekler:</b>\n` +
+            `• <code>/restart ynetmon</code>\n` +
+            `• <code>/restart adguard</code>\n` +
+            `• <code>/restart ydevhub</code>`;
+          break;
+
+        case "bugun":
+        case "today":
+          subHelp = `📅 <b>/bugun Komutu Kullanımı</b>\n\n` +
+            `Bugünün ajandasını getirir: Gündelik deftere yazılan tüm notlar ve bekleyen/tamamlanan görevler liste halinde dökülür.\n\n` +
+            `<b>Örnek:</b>\n` +
+            `• <code>/bugun</code>`;
+          break;
+
+        default:
+          subHelp = `❓ <b>"${escapeHtml(rawSubCmd)}"</b> komutu için yardım bulunamadı.\n\nGenel komut listesi için <code>/help</code> yazabilirsiniz.`;
+          break;
+      }
+
+      await sendTelegramMessage(senderChatId, subHelp);
+      return;
+    }
+
+    // YNetMon bağlantı durumunu kontrol et
+    let ynetmonConnected = false;
+    try {
+      const summary = await getYNetMonSummary();
+      ynetmonConnected = !!summary;
+    } catch {
+      ynetmonConnected = false;
+    }
+
+    let helpMsg = `⚡ <b>YDevHub Asistan Komutları</b>\n\n`;
+
+    helpMsg += `📋 <b>Görev & Not:</b>\n`;
+    helpMsg += `• <code>/gorev [saat] [başlık]</code> - Görev ekler\n`;
+    helpMsg += `• <code>/not [metin]</code> - Not kaydeder (veya direkt yaz)\n`;
+    helpMsg += `• <code>/tamam [g1|n1]</code> - Tamamlar\n`;
+    helpMsg += `• <code>/ertele [g1|n1] [süre]</code> - Erteler\n`;
+    helpMsg += `• <code>/bugun</code> - Günün not ve görev özeti\n\n`;
+
+    helpMsg += `🐳 <b>Sistem & Konteyner:</b>\n`;
+    helpMsg += `• <code>/durum</code> (veya <code>/ps</code>) - CPU/RAM ve Docker\n`;
+    helpMsg += `• <code>/restart [konteyner]</code> - Konteyner resetler\n\n`;
+
+    helpMsg += `🛡️ <b>DNS (AdGuard):</b>\n`;
+    helpMsg += `• <code>/dns</code> - İstatistikler\n`;
+    helpMsg += `• <code>/dns kapat [süre]</code> | <code>/dns ac</code>\n\n`;
+
+    if (ynetmonConnected) {
+      helpMsg += `🌐 <b>Ağ & Paket Güvenliği (YNetMon Bağlı ✅):</b>\n`;
+      helpMsg += `• <code>/ag</code> - Canlı bant genişliği, aktif bağlantı ve alarmlar\n\n`;
+    } else {
+      helpMsg += `🌐 <b>Ağ Güvenliği (YNetMon):</b>\n`;
+      helpMsg += `• <i>API bağlı değil (Ayarlardan YNetMon API URL/Key giriniz)</i>\n\n`;
+    }
+
+    helpMsg += `💡 <i>Detaylı bilgi için:</i> <code>/help [komut]</code> (örn: <code>/help gorev</code>, <code>/help ag</code>)`;
+
     await sendTelegramMessage(senderChatId, helpMsg);
     return;
   }
@@ -742,6 +873,55 @@ export async function handleIncomingMessage(msg: NonNullable<TelegramUpdate["mes
       await sendTelegramMessage(senderChatId, rep);
     } catch (err: any) {
       await sendTelegramMessage(senderChatId, `❌ YNetMon verisi alınamadı: ${err.message}`);
+    }
+    return;
+  }
+
+  // alarmlar, /alarmlar, net-alarmlar, /alerts
+  if (/^[/]?(?:alarmlar|alerts|netalarmlar|net-alerts)$/i.test(text)) {
+    try {
+      const alerts = await getYNetMonAlerts(10);
+      if (!alerts) {
+        await sendTelegramMessage(senderChatId, "⚠️ YNetMon alarmları alınamadı.");
+        return;
+      }
+      if (alerts.length === 0) {
+        await sendTelegramMessage(senderChatId, "✅ <b>YNetMon:</b> Kayıtlı herhangi bir güvenlik alarmı bulunmuyor.");
+        return;
+      }
+
+      let rep = `🚨 <b>YNetMon Son Güvenlik Alarmları (${alerts.length})</b>\n\n`;
+      for (const a of alerts) {
+        const icon = a.severity === "high" ? "🔴" : "🟡";
+        const dateStr = a.timestamp ? new Date(a.timestamp * 1000).toLocaleTimeString("tr-TR") : "";
+        rep += `${icon} <b>${escapeHtml(a.rule_name)}</b> [${dateStr}]\n`;
+        rep += `   <i>${escapeHtml(a.message)}</i>\n`;
+      }
+      await sendTelegramMessage(senderChatId, rep);
+    } catch (err: any) {
+      await sendTelegramMessage(senderChatId, `❌ Alarm sorgu hatası: ${err.message}`);
+    }
+    return;
+  }
+
+  // cihazlar, /cihazlar, devices, /devices
+  if (/^[/]?(?:cihazlar|devices|net-devices)$/i.test(text)) {
+    try {
+      const data = await getYNetMonDevices(15);
+      if (!data || !data.devices) {
+        await sendTelegramMessage(senderChatId, "⚠️ YNetMon cihaz verisi alınamadı.");
+        return;
+      }
+
+      let rep = `📱 <b>YNetMon Ağdaki Cihazlar (${data.active_count || 0} Aktif / ${data.count || 0} Kayıtlı)</b>\n\n`;
+      for (const d of data.devices.slice(0, 12)) {
+        const statusDot = d.is_online ? "🟢" : "⚪";
+        const nameStr = d.hostname || d.container_name || d.vendor || "Bilinmeyen Cihaz";
+        rep += `${statusDot} <code>${d.ip}</code> - <b>${escapeHtml(nameStr)}</b>\n`;
+      }
+      await sendTelegramMessage(senderChatId, rep);
+    } catch (err: any) {
+      await sendTelegramMessage(senderChatId, `❌ Cihaz sorgu hatası: ${err.message}`);
     }
     return;
   }

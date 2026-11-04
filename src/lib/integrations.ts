@@ -59,6 +59,67 @@ export async function getYNetMonSummary(): Promise<YNetMonSummary | null> {
   }
 }
 
+export async function getYNetMonAlerts(limit = 10): Promise<Array<any> | null> {
+  const url = getSetting("ynetmon_url") || process.env.YNETMON_URL || "http://10.10.50.1:8765";
+  const apiKey = getSetting("ynetmon_api_key") || process.env.YNETMON_API_KEY || "ynetmon_secret_hub_key_2026";
+  try {
+    const res = await fetch(`${url}/api/v1/integration/alerts?limit=${limit}`, {
+      headers: { "X-API-Key": apiKey },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.alerts || [];
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function getYNetMonDevices(limit = 20): Promise<any | null> {
+  const url = getSetting("ynetmon_url") || process.env.YNETMON_URL || "http://10.10.50.1:8765";
+  const apiKey = getSetting("ynetmon_api_key") || process.env.YNETMON_API_KEY || "ynetmon_secret_hub_key_2026";
+  try {
+    const res = await fetch(`${url}/api/v1/integration/devices?limit=${limit}`, {
+      headers: { "X-API-Key": apiKey },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function getYNetMonPackets(limit = 10): Promise<any | null> {
+  const url = getSetting("ynetmon_url") || process.env.YNETMON_URL || "http://10.10.50.1:8765";
+  const apiKey = getSetting("ynetmon_api_key") || process.env.YNETMON_API_KEY || "ynetmon_secret_hub_key_2026";
+  try {
+    const res = await fetch(`${url}/api/v1/integration/packets?limit=${limit}`, {
+      headers: { "X-API-Key": apiKey },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function getYNetMonConnections(): Promise<any | null> {
+  const url = getSetting("ynetmon_url") || process.env.YNETMON_URL || "http://10.10.50.1:8765";
+  const apiKey = getSetting("ynetmon_api_key") || process.env.YNETMON_API_KEY || "ynetmon_secret_hub_key_2026";
+  try {
+    const res = await fetch(`${url}/api/v1/integration/connections`, {
+      headers: { "X-API-Key": apiKey },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
+}
+
 export async function getAdGuardStats(): Promise<AdGuardStats | null> {
   const baseUrl = getSetting("adguard_url") || process.env.ADGUARD_URL || "http://10.10.50.1:8080";
   try {
