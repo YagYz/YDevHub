@@ -21,11 +21,12 @@ C_RED="\033[31m"
 
 echo -e "${C_CYAN}${C_BOLD}"
 cat << "EOF"
-  __   __ ___             _   _         _     
-  \ \ / /|   \  ___  __ _| | | | _  _  | |__  
-   \ V / | |) |/ -_)/ _` | |_| || || | | '_ \ 
-    |_|  |___/ \___|\__,_|\___/  \_,_| |_.__/ 
-   Homelab Developer Assistant & Remote CLI
+__     ______             _    _       _     
+\ \   / /  _ \  _____   _| |  | |_   _| |__  
+ \ \ / /| | | |/ _ \ \ / / |__| | | | | '_ \ 
+  \ V / | |_| |  __/\ V /|  __  | |_| | |_) |
+   \_/  |____/ \___| \_/ |_|  |_|\__,_|_.__/ 
+  Homelab Developer Assistant & Remote CLI
 EOF
 echo -e "${C_RESET}"
 echo -e "${C_BOLD}🚀 YDevHub CLI Kurulum Sihirbazı (Linux & macOS)${C_RESET}\n"
