@@ -36,6 +36,14 @@ try:
 except Exception:
     sys.exit(1)
 
+# Handle alternative fallback syntax like: .field // default
+q_part = expr
+fallback = None
+if ' // ' in expr:
+    parts = expr.split(' // ', 1)
+    q_part = parts[0].strip()
+    fallback = parts[1].strip()
+
 def resolve(val, query):
     if not query or query == '.':
         return val
@@ -48,7 +56,16 @@ def resolve(val, query):
             return None
     return cur
 
-res = resolve(data, expr)
+res = resolve(data, q_part)
+if res is None and fallback is not None:
+    if fallback == 'empty':
+        res = ''
+    else:
+        try:
+            res = json.loads(fallback)
+        except Exception:
+            res = fallback.strip('\"')
+
 if res is None:
     sys.exit(1)
 if raw and isinstance(res, str):
