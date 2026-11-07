@@ -40,12 +40,14 @@ import {
   Maximize2,
   Bot,
   Calendar,
+  Brain,
   Smartphone,
   ChevronDown,
   Menu,
 } from "lucide-react";
 import MarkdownViewer from "@/components/MarkdownViewer";
 import DailyNotesPanel from "@/components/DailyNotesPanel";
+import KnowledgePanel from "@/components/KnowledgePanel";
 import BotSystemPanel from "@/components/BotSystemPanel";
 
 type Project = {
@@ -157,8 +159,8 @@ export default function YDevHubPage() {
   const [securitySavedMsg, setSecuritySavedMsg] = useState("");
 
   const [activeTab, setActiveTab] = useState<
-    "daily" | "dashboard" | "kanban" | "notes" | "commands" | "vault" | "system"
-  >("daily");
+    "knowledge" | "daily" | "dashboard" | "kanban" | "notes" | "commands" | "vault" | "system"
+  >("knowledge");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileKanbanTab, setMobileKanbanTab] = useState<
     "todo" | "in_progress" | "review" | "done" | "all"
@@ -864,6 +866,26 @@ export default function YDevHubPage() {
 
             <button
               onClick={() => {
+                setActiveTab("knowledge");
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                activeTab === "knowledge"
+                  ? "bg-cyan-600/15 text-cyan-300 border border-cyan-500/30"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/70"
+              }`}
+            >
+              <span className="flex items-center gap-2.5">
+                <Brain className="w-4 h-4 text-cyan-400" />
+                Bilgi Ağı (Knowledge)
+              </span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-400 border border-cyan-800/40">
+                Ajan
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
                 setActiveTab("daily");
                 setMobileMenuOpen(false);
               }}
@@ -1303,6 +1325,11 @@ export default function YDevHubPage() {
               </div>
             </div>
           </div>
+
+          {/* TAB: AGENT KNOWLEDGE GRAPH */}
+          {activeTab === "knowledge" && (
+            <KnowledgePanel />
+          )}
 
           {/* TAB 0: DAILY NOTES */}
           {activeTab === "daily" && (
