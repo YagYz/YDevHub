@@ -3,14 +3,20 @@ import { getDb, SESSION_COOKIE_NAME, verifyAuthOrApiKey } from "@/lib/db";
 
 // Format validator and normalizer for taxonomy: [[project/layer/topic]] or [[project/topic]]
 export function normalizeWikiLink(raw: string): string {
+  if (typeof raw !== "string") return "";
   let clean = raw.trim().toLowerCase();
   clean = clean.replace(/^[\[\s]+|[\]\s]+$/g, "");
-  // Replace multiple slashes or spaces with single slash/hyphen
-  clean = clean.replace(/\s+/g, "-").replace(/\/+/g, "/");
-  return clean;
+  // Block directory traversal components
+  clean = clean.replace(/\.{2,}/g, "");
+  // Allow only alphanumeric, underscore, dash, dot, and slash
+  clean = clean.replace(/[^a-z0-9_\-\.\/]/g, "-");
+  clean = clean.replace(/\/+/g, "/").replace(/\-+/g, "-");
+  clean = clean.replace(/^[\-\/\.]+|[\-\/\.]+$/g, "");
+  return clean.slice(0, 80);
 }
 
 export function extractWikiLinks(text: string): string[] {
+  if (typeof text !== "string") return [];
   const matches = text.match(/\[\[(.*?)\]\]/g);
   if (!matches) return [];
   const links = matches.map((m) => normalizeWikiLink(m));
@@ -119,12 +125,12 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const serviceTag = (body.service_tag || body.service || "general").trim();
-    const title = (body.title || "").trim();
-    const summary = (body.summary || "").trim();
-    const content = (body.content || "").trim();
-    const diffDigest = (body.diff_digest || "").trim();
-    const sourceDevice = (body.source_device || "").trim();
+    const serviceTag = (body.service_tag || body.service || "general").trim().slice(0, 50);
+    const title = (body.title || "").trim().slice(0, 200);
+    const summary = (body.summary || "").trim().slice(0, 1000);
+    const content = (body.content || "").trim().slice(0, 50000);
+    const diffDigest = (body.diff_digest || "").trim().slice(0, 20000);
+    const sourceDevice = (body.source_device || "").trim().slice(0, 50);
     const projectId = body.project_id ? Number(body.project_id) : null;
 
     if (!title || !summary) {
@@ -201,12 +207,12 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Kayıt bulunamadı" }, { status: 404 });
     }
 
-    const serviceTag = body.service_tag !== undefined ? String(body.service_tag).trim() : existing.service_tag;
-    const title = body.title !== undefined ? String(body.title).trim() : existing.title;
-    const summary = body.summary !== undefined ? String(body.summary).trim() : existing.summary;
-    const content = body.content !== undefined ? String(body.content).trim() : existing.content;
-    const diffDigest = body.diff_digest !== undefined ? String(body.diff_digest).trim() : existing.diff_digest;
-    const sourceDevice = body.source_device !== undefined ? String(body.source_device).trim() : existing.source_device;
+    const serviceTag = body.service_tag !== undefined ? String(body.service_tag).trim().slice(0, 50) : existing.service_tag;
+    const title = body.title !== undefined ? String(body.title).trim().slice(0, 200) : existing.title;
+    const summary = body.summary !== undefined ? String(body.summary).trim().slice(0, 1000) : existing.summary;
+    const content = body.content !== undefined ? String(body.content).trim().slice(0, 50000) : existing.content;
+    const diffDigest = body.diff_digest !== undefined ? String(body.diff_digest).trim().slice(0, 20000) : existing.diff_digest;
+    const sourceDevice = body.source_device !== undefined ? String(body.source_device).trim().slice(0, 50) : existing.source_device;
     const projectId = body.project_id !== undefined ? (body.project_id ? Number(body.project_id) : null) : existing.project_id;
 
     let linkedTopics = existing.linked_topics ? JSON.parse(existing.linked_topics) : [];
