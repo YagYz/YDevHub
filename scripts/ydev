@@ -686,9 +686,9 @@ EOF
     ;;
 
   status|ping)
-    start_time=$(date +%s%3N 2>/dev/null || date +%s)
+    start_time=$(python3 -c "import time; print(int(time.time() * 1000))")
     res=$(req GET "/api/v1/notes?limit=1")
-    end_time=$(date +%s%3N 2>/dev/null || date +%s)
+    end_time=$(python3 -c "import time; print(int(time.time() * 1000))")
     diff=$(( end_time - start_time ))
     if echo "$res" | grep -q '"success":true'; then
       echo -e "${C_GREEN}✔ YDevHub REST API Aktif & Sağlıklı!${C_RESET}"
