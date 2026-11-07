@@ -1,12 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, SESSION_COOKIE_NAME, verifyAuthOrApiKey } from "@/lib/db";
 
-// Helper to extract [[topic]] links from text
-function extractWikiLinks(text: string): string[] {
+// Format validator and normalizer for taxonomy: [[project/layer/topic]] or [[project/topic]]
+export function normalizeWikiLink(raw: string): string {
+  let clean = raw.trim().toLowerCase();
+  clean = clean.replace(/^[\[\s]+|[\]\s]+$/g, "");
+  // Replace multiple slashes or spaces with single slash/hyphen
+  clean = clean.replace(/\s+/g, "-").replace(/\/+/g, "/");
+  return clean;
+}
+
+export function extractWikiLinks(text: string): string[] {
   const matches = text.match(/\[\[(.*?)\]\]/g);
   if (!matches) return [];
-  const links = matches.map((m) => m.slice(2, -2).trim().toLowerCase());
-  return Array.from(new Set(links));
+  const links = matches.map((m) => normalizeWikiLink(m));
+  return Array.from(new Set(links.filter((l) => l.length > 0)));
+}
+
+// Sync relational links in knowledge_links table
+export function syncKnowledgeLinks(db: any, sourceId: number, links: string[]): void {
+  db.prepare("DELETE FROM knowledge_links WHERE source_id = ?").run(sourceId);
+  if (links.length > 0) {
+    const insertStmt = db.prepare(
+      "INSERT INTO knowledge_links (source_id, target_tag) VALUES (?, ?)"
+    );
+    for (const link of links) {
+      insertStmt.run(sourceId, link);
+    }
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -25,38 +46,66 @@ export async function GET(req: NextRequest) {
     const params: any[] = [];
 
     if (service) {
-      conditions.push("LOWER(service_tag) = LOWER(?)");
+      conditions.push("LOWER(k.service_tag) = LOWER(?)");
       params.push(service.trim());
     }
 
     if (link) {
-      conditions.push("linked_topics LIKE ?");
-      params.push(`%"${link.trim().toLowerCase()}"%`);
+      const normLink = normalizeWikiLink(link);
+      conditions.push(
+        "k.id IN (SELECT source_id FROM knowledge_links WHERE target_tag = ? OR target_tag LIKE ?)"
+      );
+      params.push(normLink, `${normLink}/%`);
     }
 
     if (search) {
-      conditions.push("(title LIKE ? OR summary LIKE ? OR content LIKE ?)");
+      conditions.push("(k.title LIKE ? OR k.summary LIKE ? OR k.content LIKE ?)");
       const term = `%${search.trim()}%`;
       params.push(term, term, term);
     }
 
-    let sql = "SELECT * FROM agent_knowledge";
+    let sql = "SELECT k.* FROM agent_knowledge k";
     if (conditions.length > 0) {
       sql += " WHERE " + conditions.join(" AND ");
     }
-    sql += " ORDER BY updated_at DESC, id DESC LIMIT ?";
+    sql += " ORDER BY k.updated_at DESC, k.id DESC LIMIT ?";
     params.push(limit);
 
     const db = getDb();
     const rows = db.prepare(sql).all(...params) as any[];
 
-    return NextResponse.json({
-      success: true,
-      count: rows.length,
-      knowledge: rows.map((r) => ({
+    // Fetch backlinks for each row
+    const enriched = rows.map((r) => {
+      const selfTags = [
+        normalizeWikiLink(r.service_tag),
+        normalizeWikiLink(`${r.service_tag}/${r.title}`),
+      ];
+      const backlinks = db
+        .prepare(`
+          SELECT ak.id, ak.service_tag, ak.title, ak.summary
+          FROM knowledge_links kl
+          JOIN agent_knowledge ak ON ak.id = kl.source_id
+          WHERE (kl.target_tag = ? OR kl.target_tag = ?) AND ak.id != ?
+          LIMIT 10
+        `)
+        .all(selfTags[0], selfTags[1], r.id) as any[];
+
+      return {
         ...r,
         linked_topics: JSON.parse(r.linked_topics || "[]"),
-      })),
+        backlinks: backlinks.map((b) => ({
+          id: b.id,
+          service_tag: b.service_tag,
+          title: b.title,
+          summary: b.summary,
+        })),
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      count: enriched.length,
+      knowledge: enriched,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -85,14 +134,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Auto-detect wiki links from content and summary, merged with any provided
     const detectedLinks = [
       ...extractWikiLinks(content),
       ...extractWikiLinks(summary),
       ...extractWikiLinks(title),
-      ...(Array.isArray(body.linked_topics) ? body.linked_topics : []),
+      ...(Array.isArray(body.linked_topics) ? body.linked_topics.map(normalizeWikiLink) : []),
     ];
-    const uniqueLinks = Array.from(new Set(detectedLinks.map((l: string) => l.trim().toLowerCase())));
+    const uniqueLinks = Array.from(new Set(detectedLinks.filter((l) => l.length > 0)));
 
     const db = getDb();
     const stmt = db.prepare(`
@@ -112,16 +160,20 @@ export async function POST(req: NextRequest) {
       sourceDevice
     );
 
+    const insertedId = Number(result.lastInsertRowid);
+    syncKnowledgeLinks(db, insertedId, uniqueLinks);
+
     const inserted = db
       .prepare("SELECT * FROM agent_knowledge WHERE id = ?")
-      .get(result.lastInsertRowid) as any;
+      .get(insertedId) as any;
 
     return NextResponse.json(
       {
         success: true,
         knowledge: {
           ...inserted,
-          linked_topics: JSON.parse(inserted.linked_topics || "[]"),
+          linked_topics: uniqueLinks,
+          backlinks: [],
         },
       },
       { status: 201 }
@@ -159,7 +211,7 @@ export async function PATCH(req: NextRequest) {
 
     let linkedTopics = existing.linked_topics ? JSON.parse(existing.linked_topics) : [];
     if (body.linked_topics !== undefined && Array.isArray(body.linked_topics)) {
-      linkedTopics = body.linked_topics;
+      linkedTopics = body.linked_topics.map(normalizeWikiLink);
     }
     const detected = [
       ...extractWikiLinks(content),
@@ -167,7 +219,7 @@ export async function PATCH(req: NextRequest) {
       ...extractWikiLinks(title),
       ...linkedTopics,
     ];
-    const uniqueLinks = Array.from(new Set(detected.map((l: string) => l.trim().toLowerCase())));
+    const uniqueLinks = Array.from(new Set(detected.map(normalizeWikiLink).filter((l) => l.length > 0)));
 
     db.prepare(`
       UPDATE agent_knowledge
@@ -185,13 +237,15 @@ export async function PATCH(req: NextRequest) {
       id
     );
 
+    syncKnowledgeLinks(db, id, uniqueLinks);
+
     const updated = db.prepare("SELECT * FROM agent_knowledge WHERE id = ?").get(id) as any;
 
     return NextResponse.json({
       success: true,
       knowledge: {
         ...updated,
-        linked_topics: JSON.parse(updated.linked_topics || "[]"),
+        linked_topics: uniqueLinks,
       },
     });
   } catch (err: any) {
@@ -221,6 +275,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     const db = getDb();
+    db.prepare("DELETE FROM knowledge_links WHERE source_id = ?").run(id);
     const res = db.prepare("DELETE FROM agent_knowledge WHERE id = ?").run(id);
 
     return NextResponse.json({

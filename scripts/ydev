@@ -107,6 +107,12 @@ function show_help() {
   echo -e "${C_BOLD}KULLANIM:${C_RESET}"
   echo "  ydev <komut> [seçenekler]"
   echo ""
+  echo -e "${C_BOLD}🧠 AJAN & BİLGİ AĞI (Knowledge Graph):${C_RESET}"
+  echo "  ydev log <servis> <başlık> <özet> [--diff <özet>] [--device <ad>]"
+  echo "       Hafıza ağına yeni bilgi/karar kaydeder (alias: memory-log, kb-add)"
+  echo "  ydev knowledge [<servis>] [--search <terim>] [--link <etiket>] [--limit N]"
+  echo "       Bilgi ağındaki kayıtları sorgular (alias: kb, memory)"
+  echo ""
   echo -e "${C_BOLD}📝 NOT YÖNETİMİ:${C_RESET}"
   echo "  ydev note <içerik> [-p low|med|high] [--due HH:MM] [--date YYYY-MM-DD]"
   echo "       Not ekler (alias: not)"
@@ -543,6 +549,113 @@ for d in filtered[:lim]:
     name = d.get('container_name') or d.get('vendor') or 'Bilinmeyen'
     b_fmt = fmt_bytes(d.get('total_bytes', 0))
     print(f'  {ip:<15} {online:<14} {dev_type:<8} {name:<26} {b_fmt:>10}')
+" <<< "$res"
+    ;;
+
+  log|memory-log|kb-add)
+    service="${1:-}"
+    title="${2:-}"
+    summary="${3:-}"
+    shift 3 2>/dev/null || true
+
+    diff_digest=""
+    source_device="$(hostname -s 2>/dev/null || echo 'local')"
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --diff) diff_digest="$2"; shift 2 ;;
+        --device) source_device="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+
+    if [ -z "$service" ] || [ -z "$title" ] || [ -z "$summary" ]; then
+      echo -e "${C_RED}❌ Hata: Servis, başlık ve özet zorunludur.${C_RESET}" >&2
+      echo "  Kullanım: ydev log <servis> <başlık> <özet> [--diff <özet>] [--device <ad>]" >&2
+      exit 1
+    fi
+
+    payload=$(python3 -c "
+import json, sys
+data = {
+    'service_tag': sys.argv[1],
+    'title': sys.argv[2],
+    'summary': sys.argv[3],
+    'diff_digest': sys.argv[4],
+    'source_device': sys.argv[5]
+}
+print(json.dumps(data))
+" "$service" "$title" "$summary" "$diff_digest" "$source_device")
+
+    res=$(req POST "/api/v1/knowledge" "$payload")
+    if echo "$res" | grep -q '"success":true'; then
+      kid=$(parse_json -r '.knowledge.id' <<< "$res")
+      tags=$(parse_json -r '.knowledge.linked_topics | join(", ")' <<< "$res")
+      echo -e "${C_GREEN}✔ Bilgi ağına kaydedildi! (ID: #${kid})${C_RESET}"
+      echo -e "  Servis:   ${C_CYAN}${service}${C_RESET}"
+      echo -e "  Başlık:   ${C_BOLD}${title}${C_RESET}"
+      if [ -n "$tags" ]; then
+        echo -e "  Etiketler: ${C_MAGENTA}${tags}${C_RESET}"
+      fi
+    else
+      echo -e "${C_RED}❌ Kayıt başarısız:${C_RESET} $(parse_json -r '.error // "Bilinmeyen hata"' <<< "$res")" >&2
+      exit 1
+    fi
+    ;;
+
+  knowledge|kb|memory)
+    service=""
+    search=""
+    link=""
+    limit="20"
+
+    if [ $# -gt 0 ] && [[ "$1" != -* ]]; then
+      service="$1"
+      shift
+    fi
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -s|--search) search="$2"; shift 2 ;;
+        -l|--link) link="$2"; shift 2 ;;
+        --limit) limit="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+
+    query="limit=${limit}"
+    if [ -n "$service" ]; then query="${query}&service=${service}"; fi
+    if [ -n "$search" ]; then query="${query}&search=${search}"; fi
+    if [ -n "$link" ]; then query="${query}&link=${link}"; fi
+
+    res=$(req GET "/api/v1/knowledge?${query}")
+    if ! echo "$res" | grep -q '"success":true'; then
+      echo -e "${C_RED}❌ Sorgu başarısız:${C_RESET} $(parse_json -r '.error // "Bilinmeyen hata"' <<< "$res")" >&2
+      exit 1
+    fi
+
+    echo -e "${C_BOLD}🧠 YDevHub Bilgi Ağı (${service:-Tüm Servisler}):${C_RESET}"
+    python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+items = data.get('knowledge', [])
+if not items:
+    print('  (Henüz kayıt bulunamadı)')
+    sys.exit(0)
+
+for it in items:
+    kid = it.get('id')
+    tag = it.get('service_tag', 'gen')
+    title = it.get('title', '')
+    summary = it.get('summary', '')
+    dev = it.get('source_device') or '-'
+    links = it.get('linked_topics', [])
+    links_str = ' '.join(f'[[{l}]]' for l in links)
+    print(f'  \033[36m[{tag}]\033[0m \033[1m#{kid} {title}\033[0m \033[90m({dev})\033[0m')
+    print(f'    \033[2m{summary}\033[0m')
+    if links_str:
+        print(f'    \033[35m{links_str}\033[0m')
+    print('')
 " <<< "$res"
     ;;
 

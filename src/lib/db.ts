@@ -253,8 +253,18 @@ function initSchema(db: DatabaseSync) {
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS knowledge_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id INTEGER NOT NULL,
+      target_tag TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (source_id) REFERENCES agent_knowledge(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_ak_service_tag ON agent_knowledge(service_tag);
     CREATE INDEX IF NOT EXISTS idx_ak_title ON agent_knowledge(title);
+    CREATE INDEX IF NOT EXISTS idx_kl_target_tag ON knowledge_links(target_tag);
+    CREATE INDEX IF NOT EXISTS idx_kl_source_id ON knowledge_links(source_id);
   `);
 
   // Safe migration for existing databases
