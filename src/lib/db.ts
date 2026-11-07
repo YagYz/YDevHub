@@ -237,6 +237,24 @@ function initSchema(db: DatabaseSync) {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS agent_knowledge (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER,
+      service_tag TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      content TEXT DEFAULT '',
+      diff_digest TEXT DEFAULT '',
+      linked_topics TEXT DEFAULT '[]',
+      source_device TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ak_service_tag ON agent_knowledge(service_tag);
+    CREATE INDEX IF NOT EXISTS idx_ak_title ON agent_knowledge(title);
   `);
 
   // Safe migration for existing databases
